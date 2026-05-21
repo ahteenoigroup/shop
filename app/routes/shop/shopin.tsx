@@ -410,7 +410,7 @@ export default function ShopIn({ params }: Route.ComponentProps) {
       {/* Shopping Cart Overlay & Sidebar */}
       {isCartOpen && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 transition-opacity"
+          className="fixed inset-0 bg-opacity-50 z-40 transition-opacity"
           onClick={toggleCart}
         ></div>
       )}
@@ -513,7 +513,7 @@ export default function ShopIn({ params }: Route.ComponentProps) {
 
       {/* Checkout Modal */}
       {isCheckoutModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-white bg-opacity-60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl p-8 max-w-md w-full text-center transform transition-all scale-100 opacity-100">
             <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <i className="fas fa-check text-4xl text-green-500"></i>
