@@ -28,7 +28,7 @@ const menuItems = [
 
 export function meta({ params }: Route.MetaArgs) {
   return [
-    { title: "อิ่มอร่อย Delivery" },
+    { title: "อาตี๋น้อย Delivery" },
     { name: "description", content: "สั่งอาหารอร่อยๆ จากร้านดังมากมาย พร้อมโปรโมชั่นส่งฟรี" },
   ];
 }
@@ -141,7 +141,7 @@ export default function ShopIn({ params }: Route.ComponentProps) {
             <div className="flex-shrink-0 flex items-center cursor-pointer">
               <i className="fas fa-utensils text-primary text-2xl mr-2"></i>
               <span className="font-bold text-xl text-dark">
-                อิ่มอร่อย <span className="text-primary">{params.id}</span>
+                อาตี๋น้อย <span className="text-primary">{params.id}</span>
               </span>
             </div>
 
@@ -331,7 +331,7 @@ export default function ShopIn({ params }: Route.ComponentProps) {
             <div>
               <div className="flex items-center mb-4">
                 <i className="fas fa-utensils text-primary text-2xl mr-2"></i>
-                <span className="font-bold text-xl">อิ่มอร่อย</span>
+                <span className="font-bold text-xl">อาตี๋น้อย</span>
               </div>
               <p className="text-gray-400 text-sm">
                 บริการส่งอาหารออนไลน์ รวดเร็ว ทันใจ ส่งตรงถึงมือคุณ พร้อมเมนูให้เลือกหลากหลาย
@@ -402,7 +402,7 @@ export default function ShopIn({ params }: Route.ComponentProps) {
             </div>
           </div>
           <div className="border-t border-gray-700 pt-8 text-center text-gray-400 text-sm">
-            &copy; 2026 อิ่มอร่อย Delivery. สงวนลิขสิทธิ์.
+            &copy; 2026 อาตี๋น้อย Delivery. สงวนลิขสิทธิ์.
           </div>
         </div>
       </footer>

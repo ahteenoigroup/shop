@@ -3,8 +3,8 @@ import type { Route } from "./+types/home";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "อิ่มอร่อย Delivery - หน้าแรก" },
-    { name: "description", content: "ยินดีต้อนรับสู่ อิ่มอร่อย Delivery บริการสั่งอาหารออนไลน์" },
+    { title: "อาตี๋น้อย Delivery - หน้าแรก" },
+    { name: "description", content: "ยินดีต้อนรับสู่ อาตี๋น้อย Delivery บริการสั่งอาหารออนไลน์" },
   ];
 }
 
@@ -13,7 +13,7 @@ export default function Home() {
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
       <div className="text-center space-y-6">
         <h1 className="text-5xl font-extrabold text-dark">
-          อิ่มอร่อย <span className="text-primary">Delivery</span>
+          อาตี๋น้อย <span className="text-primary">Delivery</span>
         </h1>
         <p className="text-xl text-gray-600 max-w-md mx-auto">
           บริการส่งอาหารอร่อยๆ จากร้านดังมากมาย ตรงถึงมือคุณ รวดเร็ว ทันใจ

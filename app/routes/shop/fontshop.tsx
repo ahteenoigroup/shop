@@ -25,7 +25,7 @@ const restaurants = [
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "เลือกร้านอาหาร - อิ่มอร่อย Delivery" },
+    { title: "เลือกร้านอาหาร - อาตี๋น้อย Delivery" },
     { name: "description", content: "เลือกร้านอาหารที่คุณชื่นชอบ พร้อมส่งตรงถึงบ้าน" },
   ];
 }
@@ -71,7 +71,7 @@ export default function FontShop({}: Route.ComponentProps) {
             <div className="flex-shrink-0 flex items-center cursor-pointer">
               <i className="fas fa-utensils text-primary text-2xl mr-2"></i>
               <span className="font-bold text-xl text-dark">
-                อิ่มอร่อย <span className="text-primary">Delivery</span>
+                อาตี๋น้อย <span className="text-primary">Delivery</span>
               </span>
             </div>
 
@@ -247,7 +247,7 @@ export default function FontShop({}: Route.ComponentProps) {
       <footer className="bg-dark text-white pt-12 pb-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="border-t border-gray-700 pt-8 text-center text-gray-400 text-sm">
-            &copy; 2026 อิ่มอร่อย Delivery. สงวนลิขสิทธิ์.
+            &copy; 2026 อาตี๋น้อย Delivery. สงวนลิขสิทธิ์.
           </div>
         </div>
       </footer>
