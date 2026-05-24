@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link } from "react-router";
 import type { Route } from "./+types/fontshop";
 
@@ -36,6 +36,21 @@ export default function FontShop({}: Route.ComponentProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [toastMessage, setToastMessage] = useState("");
   const [isToastVisible, setIsToastVisible] = useState(false);
+  const [activeOrder, setActiveOrder] = useState<any>(null);
+
+  // Load active order on mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem("deliveryHistory");
+    if (savedHistory) {
+      try {
+        const history = JSON.parse(savedHistory);
+        const active = history.find((o: any) => o.status !== "delivered");
+        if (active) {
+          setActiveOrder(active);
+        }
+      } catch (e) {}
+    }
+  }, []);
 
   // Derived State
   const filteredRestaurants = useMemo(() => {
@@ -251,6 +266,34 @@ export default function FontShop({}: Route.ComponentProps) {
           </div>
         </div>
       </footer>
+
+      {/* Active Order Tracking Floating Banner */}
+      {activeOrder && (
+        <Link
+          to={`/shop/${activeOrder.shopName}`}
+          className="fixed bottom-6 left-6 right-6 md:left-auto md:right-6 md:w-96 bg-gray-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-white/10 z-50 flex items-center justify-between hover:scale-102 hover:bg-gray-800 transition duration-300 animate-pulse"
+        >
+          <div className="flex items-center space-x-3">
+            <div className="bg-primary text-white p-2.5 rounded-full flex items-center justify-center animate-bounce">
+              <i className="fas fa-motorcycle text-base"></i>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-gray-400">สั่งซื้อออเดอร์ในขั้นตอนจัดส่ง</p>
+              <p className="text-xs font-extrabold text-white mt-0.5">
+                {activeOrder.shopName} • {" "}
+                <span className="text-green-400">
+                  {activeOrder.status === "received" ? "รับออเดอร์แล้ว" :
+                   activeOrder.status === "preparing" ? "กำลังปรุงอาหาร" :
+                   activeOrder.status === "delivering" ? "กำลังนำส่งถึงบ้านคุณ..." : "ถึงแล้ว!"}
+                </span>
+              </p>
+            </div>
+          </div>
+          <div className="bg-white/10 hover:bg-white/20 text-white w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition">
+            <i className="fas fa-arrow-right"></i>
+          </div>
+        </Link>
+      )}
 
       {/* Notification Toast */}
       <div
