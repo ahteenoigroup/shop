@@ -286,7 +286,6 @@ export default function ShopIn({ params }: Route.ComponentProps) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [currentCategory, setCurrentCategory] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [isCartOpen, setIsCartOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [isToastVisible, setIsToastVisible] = useState(false);
 
@@ -513,7 +512,6 @@ export default function ShopIn({ params }: Route.ComponentProps) {
       showToast("กรุณาเลือกอาหารก่อนทำการสั่งซื้อ");
       return;
     }
-    setIsCartOpen(false);
     setIsCheckoutOpen(true);
     setPromptPaySeconds(300); // 5 mins QR Code limit
     setIsQRConfirmed(false);
@@ -799,17 +797,6 @@ export default function ShopIn({ params }: Route.ComponentProps) {
                 <span>สั่งซื้อเลย ({cartCount})</span>
               </button>
 
-              <button 
-                onClick={() => setIsCartOpen(!isCartOpen)} 
-                className="relative p-2.5 text-gray-600 hover:text-primary transition bg-gray-100 rounded-full"
-              >
-                <i className="fas fa-shopping-cart text-lg"></i>
-                {cartCount > 0 && (
-                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-2 py-0.5 text-[10px] font-bold leading-none text-white transform bg-primary rounded-full">
-                    {cartCount}
-                  </span>
-                )}
-              </button>
             </div>
           </div>
         </div>
