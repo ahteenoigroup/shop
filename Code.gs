@@ -12,7 +12,7 @@
  */
 
 const CONFIG = Object.freeze({
-  API_VERSION: "1.0.0",
+  API_VERSION: "1.1.0",
   TIME_ZONE: "Asia/Bangkok",
   FREE_DELIVERY_MINIMUM: 150,
   DELIVERY_FEE: 20,
@@ -44,6 +44,21 @@ const ORDER_STATUSES = Object.freeze([
 const PAYMENT_METHODS = Object.freeze(["QR PromptPay", "เงินสดปลายทาง"]);
 const PAYMENT_STATUSES = Object.freeze(["pending", "paid", "failed", "refunded"]);
 
+const ADMIN_ENTITIES = Object.freeze({
+  categories: { sheet: "Categories", id: "category_id", prefix: "CAT", width: 3 },
+  restaurants: { sheet: "Restaurants", id: "restaurant_id", prefix: "RES", width: 3 },
+  menu_items: { sheet: "Menu_Items", id: "menu_item_id", prefix: "MENU", width: 3 },
+  customization_groups: { sheet: "Customization_Groups", id: "group_id", prefix: "GRP", width: 3 },
+  customization_options: { sheet: "Customization_Options", id: "option_id", prefix: "OPT", width: 3 },
+  customers: { sheet: "Customers", id: "customer_id", prefix: "CUS", width: 6 },
+  addresses: { sheet: "Addresses", id: "address_id", prefix: "ADR", width: 6 },
+  orders: { sheet: "Orders", id: "order_id", prefix: "ORD", width: 8 },
+  order_items: { sheet: "Order_Items", id: "order_item_id", prefix: "ORI", width: 9 },
+  payments: { sheet: "Payments", id: "payment_id", prefix: "PAY", width: 8 },
+  riders: { sheet: "Riders", id: "rider_id", prefix: "RID", width: 6 },
+  order_status_history: { sheet: "Order_Status_History", id: "history_id", prefix: "HIS", width: 10 },
+});
+
 function setup() {
   const requiredHeaders = {
     Categories: ["category_id", "name_th", "slug", "icon", "is_active", "created_at"],
@@ -71,6 +86,15 @@ function setup() {
 
   PropertiesService.getScriptProperties().setProperty("SPREADSHEET_ID", getDb_().getId());
   return { ok: true, spreadsheetId: getDb_().getId(), apiVersion: CONFIG.API_VERSION };
+}
+
+function setupAdmin(adminKey) {
+  adminKey = String(adminKey || "").trim();
+  if (adminKey.length < 8) {
+    throw new Error("Admin key ต้องมีอย่างน้อย 8 ตัวอักษร");
+  }
+  PropertiesService.getScriptProperties().setProperty("ADMIN_KEY", adminKey);
+  return { ok: true, message: "ตั้งค่า Admin key สำเร็จ" };
 }
 
 function doGet(e) {
@@ -130,6 +154,30 @@ function doPost(e) {
       case "update_payment_status":
         data = withScriptLock_(function () { return updatePaymentStatus_(body); });
         break;
+      case "admin_auth":
+        assertAdmin_(body.admin_key);
+        data = { authenticated: true, api_version: CONFIG.API_VERSION };
+        break;
+      case "admin_snapshot":
+        assertAdmin_(body.admin_key);
+        data = getAdminSnapshot_();
+        break;
+      case "admin_list":
+        assertAdmin_(body.admin_key);
+        data = adminList_(body);
+        break;
+      case "admin_upsert":
+        assertAdmin_(body.admin_key);
+        data = withScriptLock_(function () { return adminUpsert_(body); });
+        break;
+      case "admin_delete":
+        assertAdmin_(body.admin_key);
+        data = withScriptLock_(function () { return adminDelete_(body); });
+        break;
+      case "admin_update_order":
+        assertAdmin_(body.admin_key);
+        data = withScriptLock_(function () { return adminUpdateOrder_(body); });
+        break;
       default:
         throw apiError_("UNKNOWN_ACTION", "ไม่รู้จัก action: " + action, 404);
     }
@@ -138,6 +186,148 @@ function doPost(e) {
   } catch (error) {
     return errorResponse_(error);
   }
+}
+
+function assertAdmin_(providedKey) {
+  const expectedKey = PropertiesService.getScriptProperties().getProperty("ADMIN_KEY");
+  if (!expectedKey) {
+    throw apiError_("ADMIN_NOT_CONFIGURED", "ยังไม่ได้ตั้งค่า Admin key กรุณารัน setupAdmin('รหัสของคุณ')", 503);
+  }
+  if (String(providedKey || "") !== expectedKey) {
+    throw apiError_("UNAUTHORIZED", "รหัสผู้ดูแลระบบไม่ถูกต้อง", 401);
+  }
+}
+
+function getAdminSnapshot_() {
+  const restaurants = readTable_(CONFIG.SHEETS.RESTAURANTS).map(publicRow_);
+  const menuItems = readTable_(CONFIG.SHEETS.MENU_ITEMS).map(publicRow_);
+  const orders = readTable_(CONFIG.SHEETS.ORDERS).map(publicRow_);
+  const customers = readTable_(CONFIG.SHEETS.CUSTOMERS).map(publicRow_);
+  const riders = readTable_(CONFIG.SHEETS.RIDERS).map(publicRow_);
+  const payments = readTable_(CONFIG.SHEETS.PAYMENTS).map(publicRow_);
+  const today = Utilities.formatDate(new Date(), CONFIG.TIME_ZONE, "yyyy-MM-dd");
+  const todayOrders = orders.filter(function (row) {
+    return String(row.ordered_at || "").indexOf(today) === 0;
+  });
+  return {
+    stats: {
+      restaurants: restaurants.length,
+      active_restaurants: restaurants.filter(function (row) { return toBoolean_(row.is_active); }).length,
+      menu_items: menuItems.length,
+      available_menu_items: menuItems.filter(function (row) { return toBoolean_(row.is_available); }).length,
+      orders: orders.length,
+      active_orders: orders.filter(function (row) {
+        return ["received", "preparing", "delivering"].indexOf(String(row.order_status)) !== -1;
+      }).length,
+      customers: customers.length,
+      riders: riders.length,
+      today_orders: todayOrders.length,
+      today_revenue: roundMoney_(todayOrders.reduce(function (sum, row) {
+        return sum + (String(row.payment_status) === "paid" ? Number(row.total || 0) : 0);
+      }, 0)),
+      total_revenue: roundMoney_(orders.reduce(function (sum, row) {
+        return sum + (String(row.payment_status) === "paid" ? Number(row.total || 0) : 0);
+      }, 0)),
+    },
+    recent_orders: orders.slice(-20).reverse(),
+    restaurants: restaurants,
+    menu_items: menuItems,
+    customers: customers,
+    riders: riders,
+    payments: payments.slice(-50).reverse(),
+  };
+}
+
+function getAdminEntity_(entity) {
+  const config = ADMIN_ENTITIES[String(entity || "").toLowerCase()];
+  if (!config) throw apiError_("UNKNOWN_ENTITY", "ไม่รู้จัก entity: " + entity, 400);
+  return config;
+}
+
+function adminList_(body) {
+  const config = getAdminEntity_(body.entity);
+  const query = String(body.query || "").trim().toLowerCase();
+  let rows = readTable_(config.sheet).map(publicRow_);
+  if (query) {
+    rows = rows.filter(function (row) {
+      return Object.keys(row).some(function (key) {
+        return String(row[key] == null ? "" : row[key]).toLowerCase().indexOf(query) !== -1;
+      });
+    });
+  }
+  return { entity: body.entity, headers: getHeaders_(getSheet_(config.sheet)), rows: rows };
+}
+
+function adminUpsert_(body) {
+  const config = getAdminEntity_(body.entity);
+  const values = body.values && typeof body.values === "object" ? body.values : {};
+  const headers = getHeaders_(getSheet_(config.sheet));
+  const clean = {};
+  headers.forEach(function (header) {
+    if (Object.prototype.hasOwnProperty.call(values, header)) clean[header] = values[header];
+  });
+
+  let id = String(clean[config.id] || body.id || "").trim();
+  const timestamp = now_();
+  if (id) {
+    const existing = findByIdOrThrow_(config.sheet, config.id, id);
+    if (headers.indexOf("updated_at") !== -1) clean.updated_at = timestamp;
+    delete clean[config.id];
+    updateById_(config.sheet, config.id, id, clean);
+    return publicRow_(Object.assign({}, existing, clean, (function () {
+      const obj = {}; obj[config.id] = id; return obj;
+    })()));
+  }
+
+  id = nextId_(config.prefix, config.sheet, config.id, config.width);
+  clean[config.id] = id;
+  if (headers.indexOf("created_at") !== -1 && !clean.created_at) clean.created_at = timestamp;
+  if (headers.indexOf("updated_at") !== -1 && !clean.updated_at) clean.updated_at = timestamp;
+  appendObject_(config.sheet, clean);
+  return publicRow_(clean);
+}
+
+function adminDelete_(body) {
+  const config = getAdminEntity_(body.entity);
+  const id = required_(body.id, "id");
+  const row = findByIdOrThrow_(config.sheet, config.id, id);
+  const softDeleteFields = ["is_active", "is_available"];
+  const softField = softDeleteFields.find(function (field) {
+    return Object.prototype.hasOwnProperty.call(row, field);
+  });
+  if (softField) {
+    const changes = {}; changes[softField] = false;
+    if (Object.prototype.hasOwnProperty.call(row, "updated_at")) changes.updated_at = now_();
+    updateById_(config.sheet, config.id, id, changes);
+    return { id: id, deleted: false, deactivated: true };
+  }
+  if (["orders", "order_items", "payments", "order_status_history"].indexOf(String(body.entity)) !== -1) {
+    throw apiError_("DELETE_NOT_ALLOWED", "ไม่อนุญาตให้ลบข้อมูลธุรกรรม", 409);
+  }
+  deleteById_(config.sheet, config.id, id);
+  return { id: id, deleted: true, deactivated: false };
+}
+
+function adminUpdateOrder_(body) {
+  const orderId = required_(body.order_id, "order_id");
+  findByIdOrThrow_(CONFIG.SHEETS.ORDERS, "order_id", orderId);
+  const changes = { updated_at: now_() };
+  if (body.order_status) {
+    if (ORDER_STATUSES.indexOf(String(body.order_status)) === -1) {
+      throw apiError_("INVALID_ORDER_STATUS", "สถานะออเดอร์ไม่ถูกต้อง", 400);
+    }
+    changes.order_status = body.order_status;
+    appendStatusHistory_(orderId, body.order_status, "admin", "admin", String(body.note || ""));
+  }
+  if (body.payment_status) {
+    if (PAYMENT_STATUSES.indexOf(String(body.payment_status)) === -1) {
+      throw apiError_("INVALID_PAYMENT_STATUS", "สถานะการชำระเงินไม่ถูกต้อง", 400);
+    }
+    changes.payment_status = body.payment_status;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "rider_id")) changes.rider_id = body.rider_id;
+  updateById_(CONFIG.SHEETS.ORDERS, "order_id", orderId, changes);
+  return Object.assign({ order_id: orderId }, changes);
 }
 
 function listCategories_() {
@@ -615,6 +805,18 @@ function updateById_(sheetName, idField, idValue, changes) {
     const column = headers.indexOf(field);
     if (column !== -1) sheet.getRange(rowNumber, column + 1).setValue(changes[field]);
   });
+}
+
+function deleteById_(sheetName, idField, idValue) {
+  const sheet = getSheet_(sheetName);
+  const headers = getHeaders_(sheet);
+  const idColumn = headers.indexOf(idField);
+  if (idColumn === -1) throw new Error("ไม่พบคอลัมน์: " + idField);
+  if (sheet.getLastRow() < 2) throw apiError_("RECORD_NOT_FOUND", "ไม่พบข้อมูล", 404);
+  const ids = sheet.getRange(2, idColumn + 1, sheet.getLastRow() - 1, 1).getDisplayValues();
+  const index = ids.findIndex(function (row) { return String(row[0]) === String(idValue); });
+  if (index === -1) throw apiError_("RECORD_NOT_FOUND", "ไม่พบข้อมูล: " + idValue, 404);
+  sheet.deleteRow(index + 2);
 }
 
 function findByIdOrThrow_(sheetName, field, value) {

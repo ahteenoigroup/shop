@@ -130,3 +130,16 @@ await fetch(WEB_APP_URL, {
 6. Copy the `/exec` URL into the React app's environment configuration.
 
 Do not publish an unauthenticated production API without adding authentication, authorization, rate limiting, and request signing.
+
+## Admin setup
+
+After replacing `Code.gs` with the latest version:
+
+1. In Apps Script, run `setupAdmin("YOUR-STRONG-ADMIN-KEY")` once.
+2. Create a new deployment/version of the Web app.
+3. Open `/admin` in the React application.
+4. Sign in with the same Admin key.
+
+The Admin key is stored in Apps Script Properties and is not saved permanently
+in the browser. The Admin page keeps it in `sessionStorage`, so it is cleared
+when the browser session ends.
