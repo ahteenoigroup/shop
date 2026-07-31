@@ -1,6 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router";
 import type { Route } from "./+types/shopin";
+import {
+  ensureGuestCustomer,
+  foodApi,
+  type ApiOrder,
+  type ApiRestaurant,
+} from "../../lib/food-api";
 
 // Restaurant Database (aligned with fontshop.tsx)
 const restaurants = [
@@ -16,14 +22,15 @@ const restaurants = [
 
 // Rich Menus mapped to specific Restaurant Categories
 interface CustomizationGroup {
+  id?: string;
   title: string;
   type: "radio" | "checkbox";
   required?: boolean;
-  options: { name: string; price: number }[];
+  options: { id?: string; name: string; price: number }[];
 }
 
 interface MenuItem {
-  id: number;
+  id: number | string;
   name: string;
   price: number;
   image: string;
@@ -205,7 +212,7 @@ const shopMenus: Record<string, MenuItem[]> = {
 // Interface for items in the shopping cart
 interface CartItem {
   cartId: string; // unique configuration ID
-  id: number;
+  id: number | string;
   name: string;
   price: number; // final computed unit price including customization options
   basePrice: number;
@@ -216,9 +223,11 @@ interface CartItem {
     meat?: string;
     extras: { name: string; price: number }[];
   };
+  optionIds?: string[];
 }
 
 interface OrderRecord {
+  orderId?: string;
   orderNumber: string;
   shopName: string;
   items: CartItem[];
@@ -227,7 +236,7 @@ interface OrderRecord {
   address: string;
   paymentMethod: string;
   date: string;
-  status: "received" | "preparing" | "delivering" | "delivered";
+  status: "received" | "preparing" | "delivering" | "delivered" | "cancelled";
 }
 
 export function meta({ params }: Route.MetaArgs) {
@@ -240,18 +249,79 @@ export function meta({ params }: Route.MetaArgs) {
 
 export default function ShopIn({ params }: Route.ComponentProps) {
   const shopNameDecoded = decodeURIComponent(params.id || "");
+  const [apiRestaurant, setApiRestaurant] = useState<ApiRestaurant | null>(null);
+  const [apiMenuItems, setApiMenuItems] = useState<MenuItem[] | null>(null);
+  const [apiWarning, setApiWarning] = useState("");
+  const [isLoadingApi, setIsLoadingApi] = useState(shopNameDecoded.startsWith("RES"));
   
   // Resolve current active restaurant
   const currentRestaurant = useMemo(() => {
+    if (apiRestaurant) {
+      return {
+        id: apiRestaurant.restaurant_id,
+        name: apiRestaurant.name,
+        rating: Number(apiRestaurant.rating),
+        category: apiRestaurant.category,
+        image: apiRestaurant.image_url,
+        popular: Boolean(apiRestaurant.is_popular),
+        deliveryTime: apiRestaurant.delivery_time,
+        distance: `${apiRestaurant.distance_km} กม.`,
+      };
+    }
     return restaurants.find(
       (r) => r.name === shopNameDecoded || r.id.toString() === shopNameDecoded
     ) || restaurants[0];
-  }, [shopNameDecoded]);
+  }, [apiRestaurant, shopNameDecoded]);
 
   // Derived current menu items
   const menuItems = useMemo(() => {
+    if (apiMenuItems) return apiMenuItems;
     return shopMenus[currentRestaurant.name] || shopMenus["กะเพราตาแตก"];
-  }, [currentRestaurant]);
+  }, [apiMenuItems, currentRestaurant]);
+
+  useEffect(() => {
+    if (!shopNameDecoded.startsWith("RES")) {
+      setIsLoadingApi(false);
+      return;
+    }
+    let cancelled = false;
+    foodApi
+      .restaurant(shopNameDecoded)
+      .then(({ restaurant, menu }) => {
+        if (cancelled) return;
+        setApiRestaurant(restaurant);
+        setApiMenuItems(
+          menu.map((item) => ({
+            id: item.menu_item_id,
+            name: item.name,
+            price: Number(item.base_price),
+            image: item.image_url,
+            popular: Boolean(item.is_popular),
+            rating: Number(item.rating),
+            category: item.category,
+            customization: item.customization_groups.map((group) => ({
+              id: group.group_id,
+              title: group.title,
+              type: group.selection_type,
+              required: Boolean(group.is_required),
+              options: group.options.map((option) => ({
+                id: option.option_id,
+                name: option.name,
+                price: Number(option.extra_price),
+              })),
+            })),
+          })),
+        );
+        setApiWarning("");
+      })
+      .catch((error: Error) => setApiWarning(error.message))
+      .finally(() => {
+        if (!cancelled) setIsLoadingApi(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [shopNameDecoded]);
 
   // Derived Categories based on actual menu items present
   const dynamicCategories = useMemo(() => {
@@ -461,6 +531,16 @@ export default function ShopIn({ params }: Route.ComponentProps) {
       meat: selectedMeat || undefined,
       extras: selectedExtras,
     };
+    const selectedNames = new Set([
+      selectedSpiciness,
+      selectedMeat,
+      ...selectedExtras.map((extra) => extra.name),
+    ]);
+    const optionIds =
+      customizingItem.customization
+        ?.flatMap((group) => group.options)
+        .filter((option) => selectedNames.has(option.name) && option.id)
+        .map((option) => option.id as string) || [];
 
     // Create unique dynamic code/id based on customizations selected
     const extrasKey = selectedExtras.map(e => e.name).sort().join(",");
@@ -486,6 +566,7 @@ export default function ShopIn({ params }: Route.ComponentProps) {
           image: customizingItem.image,
           quantity: customizationQuantity,
           customization: customizationDesc,
+          optionIds,
         },
       ];
     });
@@ -546,7 +627,7 @@ export default function ShopIn({ params }: Route.ComponentProps) {
   };
 
   // Order Placement and Simulation Engine
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     if (isPaymentProcessing) return;
 
     if (paymentMethod === "qr" && !isQRConfirmed) {
@@ -560,18 +641,58 @@ export default function ShopIn({ params }: Route.ComponentProps) {
       return;
     }
 
-    // Cash or already QR paid: Place the order!
-    const orderNum = Math.floor(100000 + Math.random() * 900000).toString();
+    // Cash or already QR paid: persist to Google Sheets when API data is active.
+    let apiOrder: ApiOrder | null = null;
+    if (String(currentRestaurant.id).startsWith("RES")) {
+      try {
+        setIsPaymentProcessing(true);
+        const address = deliveryAddresses[selectedAddressIndex];
+        const guest = await ensureGuestCustomer(address);
+        apiOrder = await foodApi.post<ApiOrder>({
+          action: "create_order",
+          customer_id: guest.customerId,
+          restaurant_id: currentRestaurant.id,
+          address_id: guest.addressId,
+          payment_method: paymentMethod === "qr" ? "QR PromptPay" : "เงินสดปลายทาง",
+          items: cart.map((item) => ({
+            menu_item_id: item.id,
+            quantity: item.quantity,
+            option_ids: item.optionIds || [],
+          })),
+        });
+        if (paymentMethod === "qr") {
+          await foodApi.post({
+            action: "update_payment_status",
+            order_id: apiOrder.order_id,
+            status: "paid",
+            transaction_ref: `WEB-${apiOrder.order_number}`,
+          });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "ส่งออเดอร์ไม่สำเร็จ";
+        setApiWarning(message);
+        showToast(message);
+        setIsPaymentProcessing(false);
+        return;
+      }
+      setIsPaymentProcessing(false);
+    }
+
+    const orderNum =
+      apiOrder?.order_number || Math.floor(100000 + Math.random() * 900000).toString();
     const newOrder: OrderRecord = {
+      orderId: apiOrder?.order_id,
       orderNumber: orderNum,
       shopName: currentRestaurant.name,
       items: [...cart],
-      subtotal,
-      total,
+      subtotal: apiOrder?.subtotal ?? subtotal,
+      total: apiOrder?.total ?? total,
       address: deliveryAddresses[selectedAddressIndex],
       paymentMethod: paymentMethod === "qr" ? "QR PromptPay" : "เงินสดปลายทาง",
-      date: new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }),
-      status: "received",
+      date:
+        apiOrder?.ordered_at ||
+        new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }),
+      status: apiOrder?.order_status || "received",
     };
 
     // Update History in State and LocalStorage
@@ -817,8 +938,23 @@ export default function ShopIn({ params }: Route.ComponentProps) {
         </div>
       </nav>
 
+      {apiWarning && (
+        <div className="mx-auto mt-4 w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <i className="fas fa-triangle-exclamation mr-2"></i>
+            {apiWarning}
+          </div>
+        </div>
+      )}
+
+      {isLoadingApi && (
+        <div className="py-24 text-center text-gray-500">
+          <i className="fas fa-spinner animate-spin mr-2"></i> กำลังโหลดข้อมูลร้านและเมนูจาก Google Sheets...
+        </div>
+      )}
+
       {/* Hero Section */}
-      <div className="relative bg-dark overflow-hidden h-56 md:h-72">
+      {!isLoadingApi && <div className="relative bg-dark overflow-hidden h-56 md:h-72">
         <div className="absolute inset-0 bg-black/60 z-10"></div>
         <img
           className="absolute inset-0 w-full h-full object-cover"
@@ -845,7 +981,7 @@ export default function ShopIn({ params }: Route.ComponentProps) {
             </p>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Main Content Area */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -1660,7 +1796,7 @@ export default function ShopIn({ params }: Route.ComponentProps) {
 
               <button
                 onClick={handlePlaceOrder}
-                disabled={isPaymentProcessing || (paymentMethod === "qr" && isQRConfirmed)}
+                disabled={isPaymentProcessing}
                 className={`py-3.5 px-8 rounded-xl text-xs font-bold shadow-md transition flex items-center space-x-2 text-white bg-primary hover:bg-primary-hover ${
                   isPaymentProcessing ? "opacity-60 cursor-not-allowed" : ""
                 }`}

@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Link } from "react-router";
 import type { Route } from "./+types/fontshop";
+import { foodApi } from "../../lib/food-api";
 
 // Mock Data
 const categories = [
@@ -12,7 +13,18 @@ const categories = [
   { id: "dessert", name: "ของหวาน", icon: "fa-ice-cream" },
 ];
 
-const restaurants = [
+type RestaurantCard = {
+  id: number | string;
+  name: string;
+  rating: number;
+  category: string;
+  image: string;
+  popular: boolean;
+  deliveryTime: string;
+  distance: string;
+};
+
+const restaurants: RestaurantCard[] = [
   { id: 1, name: "กะเพราตาแตก", rating: 4.8, category: "thai", image: "https://images.unsplash.com/photo-1552566626-52f8b828add9?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=60", popular: true, deliveryTime: "25-30 นาที", distance: "1.2 กม." },
   { id: 2, name: "ซูชิขั้นเทพ", rating: 4.5, category: "japanese", image: "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=60", popular: true, deliveryTime: "30-40 นาที", distance: "2.5 กม." },
   { id: 3, name: "เตี๋ยวเรือคลองห้า", rating: 4.9, category: "thai", image: "https://images.unsplash.com/photo-1552611052-33e04de081de?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=60", popular: true, deliveryTime: "15-20 นาที", distance: "0.8 กม." },
@@ -37,6 +49,9 @@ export default function FontShop({}: Route.ComponentProps) {
   const [toastMessage, setToastMessage] = useState("");
   const [isToastVisible, setIsToastVisible] = useState(false);
   const [activeOrder, setActiveOrder] = useState<any>(null);
+  const [restaurantItems, setRestaurantItems] = useState(restaurants);
+  const [isLoadingRestaurants, setIsLoadingRestaurants] = useState(true);
+  const [apiWarning, setApiWarning] = useState("");
 
   // Load active order on mount
   useEffect(() => {
@@ -52,9 +67,40 @@ export default function FontShop({}: Route.ComponentProps) {
     }
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    foodApi
+      .restaurants()
+      .then((items) => {
+        if (cancelled) return;
+        setRestaurantItems(
+          items.map((item) => ({
+            id: item.restaurant_id,
+            name: item.name,
+            rating: Number(item.rating),
+            category: item.category,
+            image: item.image_url,
+            popular: Boolean(item.is_popular),
+            deliveryTime: item.delivery_time,
+            distance: `${item.distance_km} กม.`,
+          })),
+        );
+        setApiWarning("");
+      })
+      .catch((error: Error) => {
+        if (!cancelled) setApiWarning(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingRestaurants(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Derived State
   const filteredRestaurants = useMemo(() => {
-    let items = restaurants;
+    let items = restaurantItems;
     if (currentCategory !== "all") {
       if (currentCategory === "popular") {
         items = items.filter((item) => item.popular);
@@ -67,7 +113,7 @@ export default function FontShop({}: Route.ComponentProps) {
       items = items.filter((item) => item.name.toLowerCase().includes(query));
     }
     return items;
-  }, [currentCategory, searchQuery]);
+  }, [currentCategory, searchQuery, restaurantItems]);
 
   // Handlers
   const showToast = (message: string) => {
@@ -172,6 +218,12 @@ export default function FontShop({}: Route.ComponentProps) {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12" id="restaurant-section">
+        {apiWarning && (
+          <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <i className="fas fa-triangle-exclamation mr-2"></i>
+            {apiWarning} — กำลังแสดงข้อมูลสำรองจากโปรเจกต์
+          </div>
+        )}
         {/* Categories */}
         <div className="mb-10">
           <h2 className="text-2xl font-bold mb-6 border-l-4 border-primary pl-3">หมวดหมู่อาหาร</h2>
@@ -204,7 +256,11 @@ export default function FontShop({}: Route.ComponentProps) {
             </h2>
           </div>
 
-          {filteredRestaurants.length === 0 ? (
+          {isLoadingRestaurants ? (
+            <div className="py-20 text-center text-gray-500">
+              <i className="fas fa-spinner animate-spin mr-2"></i> กำลังโหลดร้านอาหาร...
+            </div>
+          ) : filteredRestaurants.length === 0 ? (
             <div className="text-center py-20">
               <i className="fas fa-search text-6xl text-gray-300 mb-4"></i>
               <h3 className="text-xl text-gray-600 font-medium">ไม่พบร้านอาหารที่ค้นหา</h3>
@@ -246,7 +302,7 @@ export default function FontShop({}: Route.ComponentProps) {
                       <div className="text-sm text-gray-500">
                         <i className="far fa-clock mr-1"></i> {restaurant.deliveryTime}
                       </div>
-                      <Link to={`/shop/${restaurant.name}`} className="text-primary font-bold hover:underline">
+                      <Link to={`/shop/${restaurant.id}`} className="text-primary font-bold hover:underline">
                         เลือกร้าน <i className="fas fa-chevron-right ml-1 text-xs"></i>
                       </Link>
                     </div>
