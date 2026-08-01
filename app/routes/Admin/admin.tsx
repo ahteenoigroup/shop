@@ -34,6 +34,12 @@ const money = (value: unknown) =>
     maximumFractionDigits: 0,
   }).format(Number(value || 0));
 
+const riderStatusMeta: Record<string, { label: string; className: string }> = {
+  assigned: { label: "ได้รับ Order แล้ว", className: "bg-blue-50 text-blue-700" },
+  available: { label: "ยังไม่ได้รับ Order", className: "bg-emerald-50 text-emerald-700" },
+  offline: { label: "ออฟไลน์", className: "bg-slate-100 text-slate-500" },
+};
+
 export default function Admin() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -330,7 +336,11 @@ function EntityTable({
               <tr key={String(row[config.id])} className="hover:bg-slate-50/70">
                 {columns.map((column) => (
                   <td key={column} className="max-w-[260px] truncate px-5 py-4">
-                    {typeof row[column] === "boolean" ? (
+                    {config.entity === "riders" && column === "status" ? (
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${riderStatusMeta[String(row[column])]?.className || "bg-slate-100 text-slate-500"}`}>
+                        {riderStatusMeta[String(row[column])]?.label || String(row[column] ?? "-")}
+                      </span>
+                    ) : typeof row[column] === "boolean" ? (
                       <span className={`rounded-full px-2 py-1 text-xs font-bold ${row[column] ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{row[column] ? "เปิด" : "ปิด"}</span>
                     ) : String(row[column] ?? "-")}
                   </td>
@@ -357,12 +367,22 @@ function OrdersTable({ rows, riders, adminKey, reload, setError }: { rows: Admin
       setError(caught instanceof Error ? caught.message : "อัปเดตไม่สำเร็จ");
     }
   };
+  const remove = async (order: AdminRow) => {
+    const orderNumber = String(order.order_number || order.order_id);
+    if (!window.confirm(`ยืนยันลบออเดอร์ #${orderNumber} ถาวร? ข้อมูลที่เกี่ยวข้องจะถูกลบทั้งหมดและไม่สามารถกู้คืนได้`)) return;
+    try {
+      await adminApi.remove(adminKey, "orders", String(order.order_id));
+      await reload();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "ลบออเดอร์ไม่สำเร็จ");
+    }
+  };
   return (
     <div className="rounded-2xl border border-slate-100 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-6 py-5"><h2 className="font-black">จัดการออเดอร์</h2><p className="text-xs text-slate-400">อัปเดตสถานะ การชำระเงิน และมอบหมายไรเดอร์</p></div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1100px] text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-400"><tr><th className="px-5 py-4">ออเดอร์</th><th className="px-5 py-4">ร้าน</th><th className="px-5 py-4">ยอดรวม</th><th className="px-5 py-4">สถานะออเดอร์</th><th className="px-5 py-4">การชำระเงิน</th><th className="px-5 py-4">ไรเดอร์</th><th className="px-5 py-4">เวลา</th></tr></thead>
+          <thead className="bg-slate-50 text-xs uppercase text-slate-400"><tr><th className="px-5 py-4">ออเดอร์</th><th className="px-5 py-4">ร้าน</th><th className="px-5 py-4">ยอดรวม</th><th className="px-5 py-4">สถานะออเดอร์</th><th className="px-5 py-4">การชำระเงิน</th><th className="px-5 py-4">ไรเดอร์</th><th className="px-5 py-4">เวลา</th><th className="px-5 py-4 text-right">จัดการ</th></tr></thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((order) => (
               <tr key={String(order.order_id)}>
@@ -373,6 +393,7 @@ function OrdersTable({ rows, riders, adminKey, reload, setError }: { rows: Admin
                 <td className="px-5 py-4"><select value={String(order.payment_status)} onChange={(event) => void update(order, "payment_status", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="pending">รอชำระ</option><option value="paid">ชำระแล้ว</option><option value="failed">ล้มเหลว</option><option value="refunded">คืนเงิน</option></select></td>
                 <td className="px-5 py-4"><select value={String(order.rider_id || "")} onChange={(event) => void update(order, "rider_id", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="">ยังไม่กำหนด</option>{riders.map((rider) => <option key={String(rider.rider_id)} value={String(rider.rider_id)}>{String(rider.full_name)}</option>)}</select></td>
                 <td className="px-5 py-4 text-xs text-slate-400">{String(order.ordered_at || "")}</td>
+                <td className="px-5 py-4 text-right"><button type="button" onClick={() => void remove(order)} className="rounded-lg bg-red-50 px-3 py-2 font-bold text-red-700 hover:bg-red-100" title="ลบออเดอร์ถาวร"><i className="fas fa-trash mr-2" />ลบ</button></td>
               </tr>
             ))}
           </tbody>
@@ -416,7 +437,13 @@ function EntityModal({ config, row, onClose, onSave }: { config: (typeof entityM
     event.preventDefault();
     setSaving(true);
     setError("");
-    try { await onSave(values); } catch (caught) { setError(caught instanceof Error ? caught.message : "บันทึกไม่สำเร็จ"); setSaving(false); }
+    const payload: AdminRow = {};
+    config.fields.forEach((field) => {
+      const value = values[field.key];
+      if (value === null || value === "") return;
+      payload[field.key] = field.type === "number" ? Number(value) : value;
+    });
+    try { await onSave(payload); } catch (caught) { setError(caught instanceof Error ? caught.message : "บันทึกไม่สำเร็จ"); setSaving(false); }
   };
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
@@ -425,7 +452,7 @@ function EntityModal({ config, row, onClose, onSave }: { config: (typeof entityM
         <form onSubmit={submit} className="grid gap-5 p-6 sm:grid-cols-2">
           {config.fields.map((field) => (
             <label key={field.key} className={field.key.includes("url") ? "sm:col-span-2" : ""}><span className="mb-2 block text-sm font-bold text-slate-700">{field.label}{field.required && <span className="text-primary"> *</span>}</span>
-              {field.type === "boolean" ? <input type="checkbox" checked={Boolean(values[field.key])} onChange={(event) => setValues({ ...values, [field.key]: event.target.checked })} className="h-5 w-5 accent-red-600" /> : field.type === "select" ? <select value={String(values[field.key] ?? "")} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-3 outline-none focus:border-primary">{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input required={field.required} type={field.type || "text"} step={field.type === "number" ? "any" : undefined} value={String(values[field.key] ?? "")} onChange={(event) => setValues({ ...values, [field.key]: field.type === "number" ? Number(event.target.value) : event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-primary" />}
+              {field.type === "boolean" ? <input type="checkbox" checked={Boolean(values[field.key])} onChange={(event) => setValues({ ...values, [field.key]: event.target.checked })} className="h-5 w-5 accent-red-600" /> : field.type === "select" ? <select value={String(values[field.key] ?? "")} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-3 outline-none focus:border-primary">{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input required={field.required} type={field.type || "text"} step={field.type === "number" ? "any" : undefined} min={field.min} max={field.max} value={String(values[field.key] ?? "")} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-primary" />}
             </label>
           ))}
           {error && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700 sm:col-span-2">{error}</p>}

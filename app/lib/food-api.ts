@@ -114,7 +114,7 @@ const jsonRequest = (method: "POST" | "PATCH", body: Record<string, unknown>) =>
 });
 
 const createId = (prefix: string) =>
-  `${prefix}${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 20);
+  `${prefix}${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 16);
 
 export const foodApi = {
   restaurants: () =>
@@ -163,8 +163,14 @@ export const foodApi = {
 };
 
 export async function ensureGuestCustomer(address: string) {
-  const savedCustomerId = localStorage.getItem("foodApiCustomerId");
-  const savedAddressId = localStorage.getItem(`foodApiAddress:${address}`);
+  let savedCustomerId = localStorage.getItem("foodApiCustomerId");
+  let savedAddressId = localStorage.getItem(`foodApiAddress:${address}`);
+  if ((savedCustomerId?.length ?? 0) > 16 || (savedAddressId?.length ?? 0) > 16) {
+    localStorage.removeItem("foodApiCustomerId");
+    localStorage.removeItem(`foodApiAddress:${address}`);
+    savedCustomerId = null;
+    savedAddressId = null;
+  }
   if (savedCustomerId && savedAddressId) {
     return { customerId: savedCustomerId, addressId: savedAddressId };
   }
@@ -179,7 +185,6 @@ export async function ensureGuestCustomer(address: string) {
   if (!customerId) {
     const customer = await foodApi.post<{ customer_id: string }>({
       action: "create_customer",
-      customer_id: createId("CUS"),
       full_name: "ลูกค้าออนไลน์",
       phone,
     });

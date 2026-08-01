@@ -1,4 +1,4 @@
-import { foodApi } from "./food-api";
+import { FOOD_API_URL, FoodApiError } from "./food-api";
 import { authApi } from "./auth-api";
 
 export type AdminEntity =
@@ -34,42 +34,143 @@ export interface AdminStats {
 export interface AdminSnapshot {
   stats: AdminStats;
   recent_orders: AdminRow[];
+  categories: AdminRow[];
   restaurants: AdminRow[];
   menu_items: AdminRow[];
   customers: AdminRow[];
+  addresses: AdminRow[];
   riders: AdminRow[];
   payments: AdminRow[];
 }
 
-const adminPost = <T>(adminKey: string, body: Record<string, unknown>) =>
-  foodApi.post<T>({ ...body, admin_key: adminKey });
+const entityPaths: Partial<Record<AdminEntity, string>> = {
+  categories: "categories",
+  restaurants: "restaurants",
+  menu_items: "menu-items",
+  customers: "customers",
+  addresses: "addresses",
+  orders: "orders",
+  riders: "riders",
+};
+
+const prefixes: Partial<Record<AdminEntity, string>> = {
+  categories: "CAT",
+  restaurants: "RES",
+  menu_items: "MENU",
+  customers: "CUS",
+  addresses: "ADR",
+  riders: "RID",
+};
+
+const idFields: Partial<Record<AdminEntity, string>> = {
+  categories: "category_id",
+  restaurants: "restaurant_id",
+  menu_items: "menu_item_id",
+  customers: "customer_id",
+  addresses: "address_id",
+  riders: "rider_id",
+};
+
+const createId = (prefix: string) =>
+  `${prefix}${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 16);
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = sessionStorage.getItem("adminAccessToken");
+  const response = await fetch(`${FOOD_API_URL}/${path}`, {
+    ...init,
+    headers: {
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
+  });
+  const payload = (await response.json()) as T & { message?: string | string[] };
+  if (!response.ok) {
+    const message = Array.isArray(payload.message)
+      ? payload.message.join(", ")
+      : payload.message;
+    throw new FoodApiError(message || `Admin API error (${response.status})`, String(response.status));
+  }
+  return payload;
+}
+
+const listRows = (entity: AdminEntity) => {
+  const path = entityPaths[entity];
+  if (!path) throw new FoodApiError(`ยังไม่มี REST endpoint สำหรับ ${entity}`);
+  return request<AdminRow[]>(path);
+};
 
 export const adminApi = {
   authenticate: (adminKey: string) =>
     authApi.adminLogin(adminKey),
-  snapshot: (adminKey: string) =>
-    adminPost<AdminSnapshot>(adminKey, { action: "admin_snapshot" }),
-  list: (adminKey: string, entity: AdminEntity, query = "") =>
-    adminPost<{ entity: AdminEntity; headers: string[]; rows: AdminRow[] }>(
-      adminKey,
-      { action: "admin_list", entity, query },
-    ),
+  snapshot: async (_adminKey: string): Promise<AdminSnapshot> => {
+    const [categories, restaurants, menuItems, customers, addresses, riders, orders] = await Promise.all([
+      listRows("categories"),
+      listRows("restaurants"),
+      listRows("menu_items"),
+      listRows("customers"),
+      listRows("addresses"),
+      listRows("riders"),
+      listRows("orders"),
+    ]);
+    const orderDetails = await Promise.all(
+      orders.map((order) => request<AdminRow>(`orders/${encodeURIComponent(String(order.order_id))}`)),
+    );
+    const payments = orderDetails
+      .map((order) => order.payment)
+      .filter(Boolean) as unknown as AdminRow[];
+    const today = new Date().toISOString().slice(0, 10);
+    const todayOrders = orders.filter((order) => String(order.ordered_at || "").slice(0, 10) === today);
+    const paidOrders = orders.filter((order) => order.payment_status === "paid");
+    return {
+      stats: {
+        restaurants: restaurants.length,
+        active_restaurants: restaurants.filter((row) => row.is_active).length,
+        menu_items: menuItems.length,
+        available_menu_items: menuItems.filter((row) => row.is_available).length,
+        orders: orders.length,
+        active_orders: orders.filter((row) => !["delivered", "cancelled"].includes(String(row.order_status))).length,
+        customers: customers.length,
+        riders: riders.length,
+        today_orders: todayOrders.length,
+        today_revenue: todayOrders.filter((row) => row.payment_status === "paid").reduce((sum, row) => sum + Number(row.total || 0), 0),
+        total_revenue: paidOrders.reduce((sum, row) => sum + Number(row.total || 0), 0),
+      },
+      recent_orders: orders,
+      categories,
+      restaurants,
+      menu_items: menuItems,
+      customers,
+      addresses,
+      riders,
+      payments,
+    };
+  },
+  list: async (_adminKey: string, entity: AdminEntity, query = "") => {
+    const rows = await listRows(entity);
+    const filtered = query
+      ? rows.filter((row) => Object.values(row).some((value) => String(value ?? "").toLowerCase().includes(query.toLowerCase())))
+      : rows;
+    return { entity, headers: Object.keys(filtered[0] || {}), rows: filtered };
+  },
   upsert: (
     adminKey: string,
     entity: AdminEntity,
     values: AdminRow,
     id?: string,
   ) =>
-    adminPost<AdminRow>(adminKey, {
-      action: "admin_upsert",
-      entity,
-      values,
-      id,
+    request<AdminRow>(`${entityPaths[entity]}${id ? `/${encodeURIComponent(id)}` : ""}`, {
+      method: id ? "PATCH" : "POST",
+      body: JSON.stringify(
+        id || !idFields[entity]
+          ? values
+          : { ...values, [idFields[entity]!]: createId(prefixes[entity] || "ID") },
+      ),
     }),
   remove: (adminKey: string, entity: AdminEntity, id: string) =>
-    adminPost<{ id: string; deleted: boolean; deactivated: boolean }>(
-      adminKey,
-      { action: "admin_delete", entity, id },
+    request<{ id: string; deleted: boolean; deactivated: boolean }>(
+      `${entityPaths[entity]}/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
     ),
   updateOrder: (
     adminKey: string,
@@ -81,9 +182,18 @@ export const adminApi = {
       note?: string;
     },
   ) =>
-    adminPost<AdminRow>(adminKey, {
-      action: "admin_update_order",
-      order_id: orderId,
-      ...values,
-    }),
+    values.order_status
+      ? request<AdminRow>(`orders/${encodeURIComponent(orderId)}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: values.order_status, changed_by_type: "admin", note: values.note }),
+        })
+      : values.payment_status
+        ? request<AdminRow>(`orders/${encodeURIComponent(orderId)}/payment`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: values.payment_status }),
+          })
+        : request<AdminRow>(`orders/${encodeURIComponent(orderId)}/rider`, {
+            method: "PATCH",
+            body: JSON.stringify({ rider_id: values.rider_id || null }),
+          }),
 };
