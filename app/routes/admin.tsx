@@ -149,7 +149,8 @@ export default function Admin() {
 
   useEffect(() => {
     const saved = sessionStorage.getItem("adminKey");
-    if (saved) setAdminKey(saved);
+    const token = sessionStorage.getItem("adminAccessToken");
+    if (saved && token) setAdminKey(saved);
   }, []);
 
   const loadSnapshot = useCallback(async (key: string) => {
@@ -176,8 +177,9 @@ export default function Admin() {
     setLoading(true);
     setError("");
     try {
-      await adminApi.authenticate(keyInput.trim());
+      const result = await adminApi.authenticate(keyInput.trim());
       sessionStorage.setItem("adminKey", keyInput.trim());
+      sessionStorage.setItem("adminAccessToken", result.access_token);
       setAdminKey(keyInput.trim());
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "เข้าสู่ระบบไม่สำเร็จ");
@@ -188,6 +190,7 @@ export default function Admin() {
 
   const logout = () => {
     sessionStorage.removeItem("adminKey");
+    sessionStorage.removeItem("adminAccessToken");
     setAdminKey("");
     setKeyInput("");
     setSnapshot(null);
@@ -203,7 +206,7 @@ export default function Admin() {
           <p className="text-sm font-bold text-primary">อาตี๋น้อย Delivery</p>
           <h1 className="mt-2 text-3xl font-black text-slate-900">Admin Login</h1>
           <p className="mt-3 text-sm text-slate-500">
-            กรอก Admin key ที่ตั้งไว้ใน Google Apps Script
+            กรอก Admin key สำหรับเข้าสู่ระบบผู้ดูแล
           </p>
           <form onSubmit={login} className="mt-8">
             <label htmlFor="admin-key" className="mb-2 block text-sm font-bold text-slate-700">

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import type { Route } from "./+types/home";
+import { authApi } from "../lib/auth-api";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -18,8 +19,9 @@ export default function Home() {
   const navigate = useNavigate();
   const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedPhone = normalizePhone(phone);
 
@@ -28,17 +30,26 @@ export default function Home() {
       return;
     }
 
-    const previousPhone = localStorage.getItem("foodApiGuestPhone");
-    if (previousPhone && previousPhone !== normalizedPhone) {
-      localStorage.removeItem("foodApiCustomerId");
-      Object.keys(localStorage)
-        .filter((key) => key.startsWith("foodApiAddress:"))
-        .forEach((key) => localStorage.removeItem(key));
-    }
-
-    localStorage.setItem("foodApiGuestPhone", normalizedPhone);
+    setLoading(true);
     setError("");
-    navigate("/shop");
+    try {
+      const result = await authApi.userLogin(normalizedPhone);
+      const previousPhone = localStorage.getItem("foodApiGuestPhone");
+      if (previousPhone && previousPhone !== normalizedPhone) {
+        Object.keys(localStorage)
+          .filter((key) => key.startsWith("foodApiAddress:"))
+          .forEach((key) => localStorage.removeItem(key));
+      }
+      localStorage.setItem("foodApiAccessToken", result.access_token);
+      localStorage.setItem("foodApiCustomerId", result.user.customer_id);
+      localStorage.setItem("foodApiGuestPhone", result.user.phone);
+      localStorage.setItem("foodApiUser", JSON.stringify(result.user));
+      navigate("/shop");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "เข้าสู่ระบบไม่สำเร็จ");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -146,10 +157,11 @@ export default function Home() {
 
               <button
                 type="submit"
+                disabled={loading}
                 className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-4 font-bold text-white shadow-lg shadow-red-200 transition hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-xl active:translate-y-0"
               >
-                เข้าสู่ระบบ
-                <i className="fas fa-arrow-right text-sm" />
+                {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+                <i className={`fas ${loading ? "fa-spinner fa-spin" : "fa-arrow-right"} text-sm`} />
               </button>
             </form>
 

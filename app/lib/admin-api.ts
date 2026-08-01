@@ -1,4 +1,5 @@
 import { foodApi } from "./food-api";
+import { authApi } from "./auth-api";
 
 export type AdminEntity =
   | "categories"
@@ -45,9 +46,7 @@ const adminPost = <T>(adminKey: string, body: Record<string, unknown>) =>
 
 export const adminApi = {
   authenticate: (adminKey: string) =>
-    adminPost<{ authenticated: boolean; api_version: string }>(adminKey, {
-      action: "admin_auth",
-    }),
+    authApi.adminLogin(adminKey),
   snapshot: (adminKey: string) =>
     adminPost<AdminSnapshot>(adminKey, { action: "admin_snapshot" }),
   list: (adminKey: string, entity: AdminEntity, query = "") =>

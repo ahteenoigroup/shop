@@ -1,11 +1,5 @@
 export const FOOD_API_URL =
-  "https://script.google.com/macros/s/AKfycbz7r063tTjIsp8ceKZwgKKi37m9MaOe-zxNxIon0TjHZqhIxaaWnw1EeJAh7HKTzOSP/exec";
-
-type ApiEnvelope<T> = {
-  ok: boolean;
-  data?: T;
-  error?: { code?: string; message?: string; status?: number };
-};
+  "http://localhost:3000/api";
 
 export class FoodApiError extends Error {
   code?: string;
@@ -84,7 +78,7 @@ const getJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
     response = await fetch(url, { redirect: "follow", ...init });
   } catch {
     throw new FoodApiError(
-      "เชื่อมต่อ Google Apps Script ไม่สำเร็จ กรุณาตั้งค่า Web App เป็น Who has access: Anyone",
+      "ไม่สามารถเชื่อมต่อ Food API ที่ http://localhost:3000 ได้",
       "API_UNREACHABLE",
     );
   }
@@ -92,43 +86,80 @@ const getJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
 
   if (!contentType.includes("application/json")) {
     throw new FoodApiError(
-      "API ยังไม่เปิดสิทธิ์สาธารณะ กรุณา Deploy Web App โดยเลือก Who has access: Anyone",
-      "API_NOT_PUBLIC",
+      `Food API ตอบกลับด้วยข้อมูลที่ไม่ใช่ JSON (${response.status})`,
+      "INVALID_API_RESPONSE",
     );
   }
 
-  const payload = (await response.json()) as ApiEnvelope<T>;
-  if (!payload.ok || payload.data === undefined) {
+  const payload = (await response.json()) as T & {
+    message?: string | string[];
+    error?: string;
+  };
+  if (!response.ok) {
+    const message = Array.isArray(payload.message)
+      ? payload.message.join(", ")
+      : payload.message;
     throw new FoodApiError(
-      payload.error?.message || "ไม่สามารถเชื่อมต่อฐานข้อมูลได้",
-      payload.error?.code,
+      message || payload.error || `Food API error (${response.status})`,
+      String(response.status),
     );
   }
-  return payload.data;
+  return payload;
 };
+
+const jsonRequest = (method: "POST" | "PATCH", body: Record<string, unknown>) => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+const createId = (prefix: string) =>
+  `${prefix}${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 20);
 
 export const foodApi = {
   restaurants: () =>
-    getJson<ApiRestaurant[]>(`${FOOD_API_URL}?resource=restaurants`),
-  restaurant: (restaurantId: string) =>
-    getJson<{ restaurant: ApiRestaurant; menu: ApiMenuItem[] }>(
-      `${FOOD_API_URL}?resource=restaurant&id=${encodeURIComponent(restaurantId)}`,
-    ),
+    getJson<ApiRestaurant[]>(`${FOOD_API_URL}/restaurants`),
+  restaurant: async (restaurantId: string) => {
+    const detail = await getJson<ApiRestaurant & { menu_items: ApiMenuItem[] }>(
+      `${FOOD_API_URL}/restaurants/${encodeURIComponent(restaurantId)}`,
+    );
+    const menu = await Promise.all(
+      detail.menu_items.map((item) =>
+        getJson<ApiMenuItem>(
+          `${FOOD_API_URL}/menu-items/${encodeURIComponent(item.menu_item_id)}`,
+        ),
+      ),
+    );
+    const { menu_items: _menuItems, ...restaurant } = detail;
+    return { restaurant, menu };
+  },
   menu: (restaurantId: string) =>
     getJson<ApiMenuItem[]>(
-      `${FOOD_API_URL}?resource=menu&restaurant_id=${encodeURIComponent(restaurantId)}`,
+      `${FOOD_API_URL}/menu-items?restaurant_id=${encodeURIComponent(restaurantId)}`,
     ),
   order: (orderId: string) =>
     getJson<Record<string, unknown>>(
-      `${FOOD_API_URL}?resource=order&order_id=${encodeURIComponent(orderId)}`,
+      `${FOOD_API_URL}/orders/${encodeURIComponent(orderId)}`,
     ),
-  post: <T>(body: Record<string, unknown>) =>
-    getJson<T>(FOOD_API_URL, {
-      method: "POST",
-      // Apps Script Web Apps do not handle browser CORS preflight requests.
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(body),
-    }),
+  post: <T>(body: Record<string, unknown>) => {
+    const { action, ...data } = body;
+    if (action === "create_customer")
+      return getJson<T>(`${FOOD_API_URL}/customers`, jsonRequest("POST", data));
+    if (action === "save_address")
+      return getJson<T>(`${FOOD_API_URL}/addresses`, jsonRequest("POST", data));
+    if (action === "create_order")
+      return getJson<T>(`${FOOD_API_URL}/orders`, jsonRequest("POST", data));
+    if (action === "update_payment_status") {
+      const { order_id, ...payment } = data;
+      return getJson<T>(
+        `${FOOD_API_URL}/orders/${encodeURIComponent(String(order_id))}/payment`,
+        jsonRequest("PATCH", payment),
+      );
+    }
+    return Promise.reject(
+      new FoodApiError(`API action ไม่รองรับ: ${String(action)}`),
+    );
+  },
 };
 
 export async function ensureGuestCustomer(address: string) {
@@ -148,6 +179,7 @@ export async function ensureGuestCustomer(address: string) {
   if (!customerId) {
     const customer = await foodApi.post<{ customer_id: string }>({
       action: "create_customer",
+      customer_id: createId("CUS"),
       full_name: "ลูกค้าออนไลน์",
       phone,
     });
@@ -157,6 +189,7 @@ export async function ensureGuestCustomer(address: string) {
 
   const savedAddress = await foodApi.post<{ address_id: string }>({
     action: "save_address",
+    address_id: createId("ADR"),
     customer_id: customerId,
     label: "ที่อยู่จัดส่ง",
     recipient_name: "ลูกค้าออนไลน์",
