@@ -51,7 +51,7 @@ export const entityMeta: Record<
     fields: [
       { key: "category_id", label: "รหัสหมวดหมู่", required: true },
       { key: "name", label: "ชื่อร้าน", required: true },
-      { key: "rating", label: "คะแนน", type: "number" },
+      { key: "rating", label: "คะแนน", type: "number", min: 0, max: 5 },
       { key: "image_url", label: "URL รูปภาพ" },
       { key: "delivery_min_minutes", label: "เวลาส่งต่ำสุด", type: "number" },
       { key: "delivery_max_minutes", label: "เวลาส่งสูงสุด", type: "number" },
@@ -67,7 +67,7 @@ export const entityMeta: Record<
       { key: "name", label: "ชื่อเมนู", required: true },
       { key: "category", label: "ประเภทเมนู", required: true },
       { key: "base_price", label: "ราคา", type: "number", required: true },
-      { key: "rating", label: "คะแนน", type: "number" },
+      { key: "rating", label: "คะแนน", type: "number", min: 0, max: 5 },
       { key: "image_url", label: "URL รูปภาพ" },
       { key: "is_popular", label: "เมนูยอดนิยม", type: "boolean" },
       { key: "is_available", label: "พร้อมขาย", type: "boolean" },

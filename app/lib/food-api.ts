@@ -175,21 +175,10 @@ export async function ensureGuestCustomer(address: string) {
     return { customerId: savedCustomerId, addressId: savedAddressId };
   }
 
-  let customerId = savedCustomerId;
-  let phone = localStorage.getItem("foodApiGuestPhone");
-  if (!phone) {
-    phone = `09${Math.floor(10000000 + Math.random() * 90000000)}`;
-    localStorage.setItem("foodApiGuestPhone", phone);
-  }
-
-  if (!customerId) {
-    const customer = await foodApi.post<{ customer_id: string }>({
-      action: "create_customer",
-      full_name: "ลูกค้าออนไลน์",
-      phone,
-    });
-    customerId = customer.customer_id;
-    localStorage.setItem("foodApiCustomerId", customerId);
+  const customerId = savedCustomerId;
+  const phone = localStorage.getItem("foodApiGuestPhone");
+  if (!customerId || !phone) {
+    throw new FoodApiError("กรุณาเข้าสู่ระบบก่อนสั่งอาหาร", "AUTH_REQUIRED");
   }
 
   const savedAddress = await foodApi.post<{ address_id: string }>({

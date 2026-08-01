@@ -52,4 +52,15 @@ export const authApi = {
     login<UserLoginResponse>("/auth/user/login", { phone }),
   adminLogin: (adminKey: string) =>
     login<AdminLoginResponse>("/auth/admin/login", { admin_key: adminKey }),
+  logoutUser: () => {
+    localStorage.removeItem("foodApiAccessToken");
+    localStorage.removeItem("foodApiCustomerId");
+    localStorage.removeItem("foodApiGuestPhone");
+    localStorage.removeItem("foodApiUser");
+    localStorage.removeItem("deliveryCart");
+    localStorage.removeItem("deliveryHistory");
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith("foodApiAddress:"))
+      .forEach((key) => localStorage.removeItem(key));
+  },
 };
