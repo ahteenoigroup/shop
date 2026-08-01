@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import type { Route } from "./+types/admin";
 import {
   adminApi,
-  type AdminEntity,
   type AdminRow,
   type AdminSnapshot,
-} from "../lib/admin-api";
+} from "../../lib/admin-api";
+import { entityMeta, tabs, type TabId } from "./admin-config";
+import { AdminLoginPage } from "./pages/AdminLoginPage";
+import { DashboardPage } from "./pages/DashboardPage";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -14,110 +16,6 @@ export function meta({}: Route.MetaArgs) {
     { name: "description", content: "ระบบจัดการร้านอาหารและออเดอร์" },
   ];
 }
-
-type TabId =
-  | "dashboard"
-  | "orders"
-  | "restaurants"
-  | "menu_items"
-  | "customers"
-  | "riders"
-  | "payments";
-
-type FieldConfig = {
-  key: string;
-  label: string;
-  type?: "text" | "number" | "boolean" | "select";
-  options?: { value: string; label: string }[];
-  required?: boolean;
-};
-
-const tabs: { id: TabId; label: string; icon: string }[] = [
-  { id: "dashboard", label: "ภาพรวม", icon: "fa-chart-pie" },
-  { id: "orders", label: "ออเดอร์", icon: "fa-receipt" },
-  { id: "restaurants", label: "ร้านอาหาร", icon: "fa-store" },
-  { id: "menu_items", label: "เมนูอาหาร", icon: "fa-bowl-food" },
-  { id: "customers", label: "ลูกค้า", icon: "fa-users" },
-  { id: "riders", label: "ไรเดอร์", icon: "fa-motorcycle" },
-  { id: "payments", label: "การชำระเงิน", icon: "fa-credit-card" },
-];
-
-const entityMeta: Record<
-  Exclude<TabId, "dashboard" | "orders" | "payments">,
-  { entity: AdminEntity; id: string; title: string; fields: FieldConfig[] }
-> = {
-  restaurants: {
-    entity: "restaurants",
-    id: "restaurant_id",
-    title: "ร้านอาหาร",
-    fields: [
-      { key: "category_id", label: "รหัสหมวดหมู่", required: true },
-      { key: "name", label: "ชื่อร้าน", required: true },
-      { key: "rating", label: "คะแนน", type: "number" },
-      { key: "image_url", label: "URL รูปภาพ" },
-      { key: "delivery_min_minutes", label: "เวลาส่งต่ำสุด", type: "number" },
-      { key: "delivery_max_minutes", label: "เวลาส่งสูงสุด", type: "number" },
-      { key: "distance_km", label: "ระยะทาง (กม.)", type: "number" },
-      { key: "is_popular", label: "ร้านยอดนิยม", type: "boolean" },
-      { key: "is_active", label: "เปิดให้บริการ", type: "boolean" },
-    ],
-  },
-  menu_items: {
-    entity: "menu_items",
-    id: "menu_item_id",
-    title: "เมนูอาหาร",
-    fields: [
-      { key: "restaurant_id", label: "รหัสร้าน", required: true },
-      { key: "name", label: "ชื่อเมนู", required: true },
-      { key: "category", label: "ประเภทเมนู", required: true },
-      { key: "base_price", label: "ราคา", type: "number", required: true },
-      { key: "rating", label: "คะแนน", type: "number" },
-      { key: "image_url", label: "URL รูปภาพ" },
-      { key: "is_popular", label: "เมนูยอดนิยม", type: "boolean" },
-      { key: "is_available", label: "พร้อมขาย", type: "boolean" },
-    ],
-  },
-  customers: {
-    entity: "customers",
-    id: "customer_id",
-    title: "ลูกค้า",
-    fields: [
-      { key: "full_name", label: "ชื่อลูกค้า", required: true },
-      { key: "phone", label: "เบอร์โทรศัพท์", required: true },
-      { key: "email", label: "อีเมล" },
-      { key: "is_active", label: "เปิดใช้งาน", type: "boolean" },
-    ],
-  },
-  riders: {
-    entity: "riders",
-    id: "rider_id",
-    title: "ไรเดอร์",
-    fields: [
-      { key: "full_name", label: "ชื่อไรเดอร์", required: true },
-      { key: "phone", label: "เบอร์โทรศัพท์", required: true },
-      { key: "vehicle_type", label: "ประเภทรถ" },
-      { key: "license_plate", label: "ทะเบียนรถ" },
-      {
-        key: "status",
-        label: "สถานะ",
-        type: "select",
-        options: [
-          { value: "available", label: "พร้อมรับงาน" },
-          { value: "assigned", label: "กำลังส่ง" },
-          { value: "offline", label: "ออฟไลน์" },
-        ],
-      },
-    ],
-  },
-};
-
-const orderStatusLabels: Record<string, string> = {
-  received: "รับออเดอร์แล้ว",
-  preparing: "กำลังปรุง",
-  delivering: "กำลังจัดส่ง",
-  delivered: "ส่งสำเร็จ",
-  cancelled: "ยกเลิก",
-};
 
 const statusClass = (status: string) => {
   if (["paid", "delivered", "available"].includes(status))
@@ -137,21 +35,43 @@ const money = (value: unknown) =>
   }).format(Number(value || 0));
 
 export default function Admin() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [adminKey, setAdminKey] = useState("");
   const [keyInput, setKeyInput] = useState("");
   const [snapshot, setSnapshot] = useState<AdminSnapshot | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<{ entity: keyof typeof entityMeta; row?: AdminRow } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const section = location.pathname.split("/")[2] || "";
+  const activeTab: TabId = tabs.some((tab) => tab.id === section)
+    ? (section as TabId)
+    : "dashboard";
 
   useEffect(() => {
     const saved = sessionStorage.getItem("adminKey");
     const token = sessionStorage.getItem("adminAccessToken");
-    if (saved && token) setAdminKey(saved);
-  }, []);
+    if (saved && token) {
+      setAdminKey(saved);
+      if (location.pathname === "/admin" || location.pathname === "/admin/") {
+        navigate("/admin/dashboard", { replace: true });
+      }
+    } else if (location.pathname !== "/admin" && location.pathname !== "/admin/") {
+      navigate("/admin", { replace: true });
+    }
+  }, [location.pathname, navigate]);
+
+  useEffect(() => {
+    if (
+      adminKey &&
+      section &&
+      !tabs.some((tab) => tab.id === section)
+    ) {
+      navigate("/admin/dashboard", { replace: true });
+    }
+  }, [adminKey, navigate, section]);
 
   const loadSnapshot = useCallback(async (key: string) => {
     setLoading(true);
@@ -181,6 +101,7 @@ export default function Admin() {
       sessionStorage.setItem("adminKey", keyInput.trim());
       sessionStorage.setItem("adminAccessToken", result.access_token);
       setAdminKey(keyInput.trim());
+      navigate("/admin/dashboard", { replace: true });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "เข้าสู่ระบบไม่สำเร็จ");
     } finally {
@@ -194,50 +115,18 @@ export default function Admin() {
     setAdminKey("");
     setKeyInput("");
     setSnapshot(null);
+    navigate("/admin", { replace: true });
   };
 
-  if (!adminKey || (!snapshot && !loading)) {
+  if (!adminKey) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-5">
-        <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl">
-          <div className="mb-8 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-red-200">
-            <i className="fas fa-shield-halved text-xl" />
-          </div>
-          <p className="text-sm font-bold text-primary">อาตี๋น้อย Delivery</p>
-          <h1 className="mt-2 text-3xl font-black text-slate-900">Admin Login</h1>
-          <p className="mt-3 text-sm text-slate-500">
-            กรอก Admin key สำหรับเข้าสู่ระบบผู้ดูแล
-          </p>
-          <form onSubmit={login} className="mt-8">
-            <label htmlFor="admin-key" className="mb-2 block text-sm font-bold text-slate-700">
-              Admin key
-            </label>
-            <input
-              id="admin-key"
-              type="password"
-              value={keyInput}
-              onChange={(event) => setKeyInput(event.target.value)}
-              placeholder="••••••••••••"
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 outline-none transition focus:border-primary focus:bg-white focus:ring-4 focus:ring-red-100"
-              autoFocus
-            />
-            {error && (
-              <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </p>
-            )}
-            <button
-              disabled={loading}
-              className="mt-6 w-full rounded-2xl bg-primary py-4 font-bold text-white transition hover:bg-primary-hover disabled:opacity-60"
-            >
-              {loading ? "กำลังตรวจสอบ..." : "เข้าสู่ระบบจัดการ"}
-            </button>
-          </form>
-          <Link to="/" className="mt-6 block text-center text-sm text-slate-400 hover:text-primary">
-            <i className="fas fa-arrow-left mr-2" /> กลับหน้าหลัก
-          </Link>
-        </div>
-      </main>
+      <AdminLoginPage
+        keyInput={keyInput}
+        loading={loading}
+        error={error}
+        onKeyChange={setKeyInput}
+        onSubmit={login}
+      />
     );
   }
 
@@ -262,7 +151,7 @@ export default function Admin() {
             <button
               key={tab.id}
               onClick={() => {
-                setActiveTab(tab.id);
+                navigate(`/admin/${tab.id}`);
                 setSidebarOpen(false);
                 setSearch("");
               }}
@@ -297,7 +186,7 @@ export default function Admin() {
             </button>
             <div>
               <h1 className="text-xl font-black">{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
-              <p className="text-xs text-slate-400">จัดการข้อมูลจาก Google Sheets แบบเรียลไทม์</p>
+              <p className="text-xs text-slate-400">จัดการข้อมูลจาก Food API แบบเรียลไทม์</p>
             </div>
           </div>
           <button
@@ -377,7 +266,7 @@ function AdminContent({
   reload: () => Promise<void>;
   setError: (value: string) => void;
 }) {
-  if (activeTab === "dashboard") return <Dashboard snapshot={snapshot} />;
+  if (activeTab === "dashboard") return <DashboardPage snapshot={snapshot} />;
   if (activeTab === "orders")
     return <OrdersTable rows={snapshot.recent_orders} riders={snapshot.riders} adminKey={adminKey} reload={reload} setError={setError} />;
   if (activeTab === "payments")
@@ -404,68 +293,6 @@ function AdminContent({
       }}
     />
   );
-}
-
-function Dashboard({ snapshot }: { snapshot: AdminSnapshot }) {
-  const cards = [
-    { label: "ยอดขายวันนี้", value: money(snapshot.stats.today_revenue), icon: "fa-coins", color: "bg-emerald-500" },
-    { label: "ออเดอร์วันนี้", value: snapshot.stats.today_orders, icon: "fa-receipt", color: "bg-blue-500" },
-    { label: "ออเดอร์กำลังดำเนินการ", value: snapshot.stats.active_orders, icon: "fa-clock", color: "bg-amber-500" },
-    { label: "ลูกค้าทั้งหมด", value: snapshot.stats.customers, icon: "fa-users", color: "bg-violet-500" },
-  ];
-  return (
-    <div className="space-y-8">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map((card) => (
-          <div key={card.label} className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-            <div className={`flex h-11 w-11 items-center justify-center rounded-xl text-white ${card.color}`}>
-              <i className={`fas ${card.icon}`} />
-            </div>
-            <p className="mt-5 text-sm text-slate-500">{card.label}</p>
-            <p className="mt-1 text-2xl font-black">{card.value}</p>
-          </div>
-        ))}
-      </div>
-      <div className="grid gap-6 xl:grid-cols-3">
-        <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm xl:col-span-2">
-          <div className="flex items-center justify-between">
-            <h2 className="font-black">ออเดอร์ล่าสุด</h2>
-            <span className="text-xs text-slate-400">{snapshot.stats.orders} ออเดอร์ทั้งหมด</span>
-          </div>
-          <div className="mt-5 space-y-3">
-            {snapshot.recent_orders.slice(0, 6).map((order) => (
-              <div key={String(order.order_id)} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-                <div>
-                  <p className="text-sm font-bold">#{String(order.order_number)}</p>
-                  <p className="text-xs text-slate-400">{String(order.ordered_at || "")}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-black">{money(order.total)}</p>
-                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${statusClass(String(order.order_status))}`}>
-                    {orderStatusLabels[String(order.order_status)] || String(order.order_status)}
-                  </span>
-                </div>
-              </div>
-            ))}
-            {!snapshot.recent_orders.length && <p className="py-10 text-center text-sm text-slate-400">ยังไม่มีออเดอร์</p>}
-          </div>
-        </div>
-        <div className="rounded-2xl bg-slate-950 p-6 text-white shadow-sm">
-          <p className="text-sm text-slate-400">รายได้สะสม</p>
-          <p className="mt-2 text-3xl font-black">{money(snapshot.stats.total_revenue)}</p>
-          <div className="mt-8 space-y-4">
-            <StatLine label="ร้านที่เปิด" value={`${snapshot.stats.active_restaurants}/${snapshot.stats.restaurants}`} />
-            <StatLine label="เมนูที่พร้อมขาย" value={`${snapshot.stats.available_menu_items}/${snapshot.stats.menu_items}`} />
-            <StatLine label="ไรเดอร์" value={`${snapshot.stats.riders} คน`} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatLine({ label, value }: { label: string; value: string }) {
-  return <div className="flex justify-between border-b border-white/10 pb-3 text-sm"><span className="text-slate-400">{label}</span><strong>{value}</strong></div>;
 }
 
 function EntityTable({
