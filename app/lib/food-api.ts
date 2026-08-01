@@ -1,5 +1,6 @@
-export const FOOD_API_URL =
-  "http://localhost:3000/api";
+const configuredApiUrl = import.meta.env.VITE_FOOD_API_URL?.trim();
+
+export const FOOD_API_URL = (configuredApiUrl || "http://localhost:3000/api").replace(/\/$/, "");
 
 export class FoodApiError extends Error {
   code?: string;
@@ -78,7 +79,7 @@ const getJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
     response = await fetch(url, { redirect: "follow", ...init });
   } catch {
     throw new FoodApiError(
-      "ไม่สามารถเชื่อมต่อ Food API ที่ http://localhost:3000 ได้",
+      `ไม่สามารถเชื่อมต่อ Food API ที่ ${FOOD_API_URL} ได้`,
       "API_UNREACHABLE",
     );
   }
