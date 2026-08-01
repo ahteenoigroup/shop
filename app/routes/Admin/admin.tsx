@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router";
 import type { Route } from "./+types/admin";
 import {
   adminApi,
+  type AdminOrderDetail,
+  type AdminOrderItem,
   type AdminRow,
   type AdminSnapshot,
 } from "../../lib/admin-api";
@@ -274,7 +276,7 @@ function AdminContent({
 }) {
   if (activeTab === "dashboard") return <DashboardPage snapshot={snapshot} />;
   if (activeTab === "orders")
-    return <OrdersTable rows={snapshot.recent_orders} riders={snapshot.riders} adminKey={adminKey} reload={reload} setError={setError} />;
+    return <OrdersTable rows={snapshot.recent_orders} details={snapshot.order_details} riders={snapshot.riders} adminKey={adminKey} reload={reload} setError={setError} />;
   if (activeTab === "payments")
     return <SimpleTable title="รายการชำระเงิน" rows={snapshot.payments} columns={["payment_id", "order_id", "method", "amount", "status", "paid_at"]} search={search} setSearch={setSearch} />;
 
@@ -358,7 +360,8 @@ function EntityTable({
   );
 }
 
-function OrdersTable({ rows, riders, adminKey, reload, setError }: { rows: AdminRow[]; riders: AdminRow[]; adminKey: string; reload: () => Promise<void>; setError: (value: string) => void }) {
+function OrdersTable({ rows, details, riders, adminKey, reload, setError }: { rows: AdminRow[]; details: Record<string, AdminOrderDetail>; riders: AdminRow[]; adminKey: string; reload: () => Promise<void>; setError: (value: string) => void }) {
+  const [selectedOrder, setSelectedOrder] = useState<AdminRow | null>(null);
   const update = async (order: AdminRow, field: "order_status" | "payment_status" | "rider_id", value: string) => {
     try {
       await adminApi.updateOrder(adminKey, String(order.order_id), { [field]: value });
@@ -393,14 +396,86 @@ function OrdersTable({ rows, riders, adminKey, reload, setError }: { rows: Admin
                 <td className="px-5 py-4"><select value={String(order.payment_status)} onChange={(event) => void update(order, "payment_status", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="pending">รอชำระ</option><option value="paid">ชำระแล้ว</option><option value="failed">ล้มเหลว</option><option value="refunded">คืนเงิน</option></select></td>
                 <td className="px-5 py-4"><select value={String(order.rider_id || "")} onChange={(event) => void update(order, "rider_id", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="">ยังไม่กำหนด</option>{riders.map((rider) => <option key={String(rider.rider_id)} value={String(rider.rider_id)}>{String(rider.full_name)}</option>)}</select></td>
                 <td className="px-5 py-4 text-xs text-slate-400">{String(order.ordered_at || "")}</td>
-                <td className="px-5 py-4 text-right"><button type="button" onClick={() => void remove(order)} className="rounded-lg bg-red-50 px-3 py-2 font-bold text-red-700 hover:bg-red-100" title="ลบออเดอร์ถาวร"><i className="fas fa-trash mr-2" />ลบ</button></td>
+                <td className="px-5 py-4 text-right">
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setSelectedOrder(order)} className="whitespace-nowrap rounded-lg bg-blue-50 px-3 py-2 font-bold text-blue-700 hover:bg-blue-100" title="ตรวจสอบรายการอาหาร"><i className="fas fa-list-check mr-2" />ตรวจสอบเมนู</button>
+                    <button type="button" onClick={() => void remove(order)} className="rounded-lg bg-red-50 px-3 py-2 font-bold text-red-700 hover:bg-red-100" title="ลบออเดอร์ถาวร"><i className="fas fa-trash mr-2" />ลบ</button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {selectedOrder && (
+        <OrderMenuModal
+          order={selectedOrder}
+          detail={details[String(selectedOrder.order_id)]}
+          onClose={() => setSelectedOrder(null)}
+        />
+      )}
     </div>
   );
+}
+
+function OrderMenuModal({ order, detail, onClose }: { order: AdminRow; detail?: AdminOrderDetail; onClose: () => void }) {
+  const items = detail?.items || [];
+  const itemTotal = (item: AdminOrderItem) =>
+    Number(item.line_total ?? Number(item.unit_price || 0) * Number(item.quantity || 0));
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section role="dialog" aria-modal="true" aria-labelledby="order-menu-title" className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <header className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-primary">รายละเอียดออเดอร์</p>
+            <h2 id="order-menu-title" className="mt-1 text-xl font-black">ตรวจสอบเมนู #{String(order.order_number || order.order_id)}</h2>
+            <p className="mt-1 text-sm text-slate-400">ตรวจสอบรายการและตัวเลือกก่อนเริ่มจัดเตรียมอาหาร</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="ปิด"><i className="fas fa-xmark text-xl" /></button>
+        </header>
+
+        <div className="max-h-[calc(90vh-165px)] overflow-y-auto p-6">
+          {items.length ? (
+            <div className="space-y-3">
+              {items.map((item, index) => {
+                const options = item.options || [];
+                return (
+                  <article key={String(item.order_item_id || index)} className="rounded-2xl border border-slate-200 p-4">
+                    <div className="flex gap-4">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-sm font-black text-white">{Number(item.quantity || 0)}x</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-4">
+                          <div><h3 className="font-black text-slate-800">{String(item.item_name_snapshot || item.name || item.menu_item_id || "ไม่ระบุชื่อเมนู")}</h3><p className="mt-1 text-xs text-slate-400">ราคาต่อชิ้น {money(item.unit_price)}</p></div>
+                          <strong className="whitespace-nowrap text-primary">{money(itemTotal(item))}</strong>
+                        </div>
+                        {options.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{options.map((option, optionIndex) => <span key={String(option.order_item_option_id || optionIndex)} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">+ {String(option.option_name_snapshot || option.name || "ตัวเลือก")} {Number(option.extra_price || 0) > 0 ? `(${money(option.extra_price)})` : ""}</span>)}</div>}
+                        {Boolean(item.note) && <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800"><i className="fas fa-note-sticky mr-2" />{String(item.note)}</p>}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-slate-50 py-12 text-center text-slate-400"><i className="fas fa-bowl-food text-3xl" /><p className="mt-3 text-sm">ไม่พบรายละเอียดเมนูในออเดอร์นี้</p></div>
+          )}
+
+          <div className="mt-6 ml-auto max-w-sm space-y-2 rounded-2xl bg-slate-50 p-4 text-sm">
+            <PriceLine label="ค่าอาหาร" value={order.subtotal} />
+            <PriceLine label="ค่าจัดส่ง" value={order.delivery_fee} />
+            {Number(order.discount || 0) > 0 && <PriceLine label="ส่วนลด" value={-Number(order.discount)} />}
+            <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-base"><span className="font-bold">ยอดรวม</span><strong className="text-xl text-primary">{money(order.total)}</strong></div>
+          </div>
+        </div>
+        <footer className="border-t border-slate-100 px-6 py-4 text-right"><button type="button" onClick={onClose} className="rounded-xl bg-slate-950 px-6 py-2.5 text-sm font-bold text-white hover:bg-slate-800">ตรวจสอบเรียบร้อย</button></footer>
+      </section>
+    </div>
+  );
+}
+
+function PriceLine({ label, value }: { label: string; value: unknown }) {
+  return <div className="flex justify-between text-slate-500"><span>{label}</span><span className="font-semibold text-slate-700">{money(value)}</span></div>;
 }
 
 function SimpleTable({ title, rows, columns, search, setSearch }: { title: string; rows: AdminRow[]; columns: string[]; search: string; setSearch: (value: string) => void }) {

@@ -17,6 +17,18 @@ export type AdminEntity =
 
 export type AdminRow = Record<string, string | number | boolean | null>;
 
+export interface AdminOrderItem {
+  [key: string]: unknown;
+  options?: AdminRow[];
+}
+
+export interface AdminOrderDetail {
+  [key: string]: unknown;
+  items?: AdminOrderItem[];
+  payment?: AdminRow | null;
+  status_history?: AdminRow[];
+}
+
 export interface AdminStats {
   restaurants: number;
   active_restaurants: number;
@@ -41,6 +53,7 @@ export interface AdminSnapshot {
   addresses: AdminRow[];
   riders: AdminRow[];
   payments: AdminRow[];
+  order_details: Record<string, AdminOrderDetail>;
 }
 
 const entityPaths: Partial<Record<AdminEntity, string>> = {
@@ -114,7 +127,7 @@ export const adminApi = {
       listRows("orders"),
     ]);
     const orderDetails = await Promise.all(
-      orders.map((order) => request<AdminRow>(`orders/${encodeURIComponent(String(order.order_id))}`)),
+      orders.map((order) => request<AdminOrderDetail>(`orders/${encodeURIComponent(String(order.order_id))}`)),
     );
     const payments = orderDetails
       .map((order) => order.payment)
@@ -144,6 +157,9 @@ export const adminApi = {
       addresses,
       riders,
       payments,
+      order_details: Object.fromEntries(
+        orderDetails.map((detail) => [String(detail.order_id), detail]),
+      ),
     };
   },
   list: async (_adminKey: string, entity: AdminEntity, query = "") => {
