@@ -14,11 +14,13 @@ export type TabId =
 export type FieldConfig = {
   key: string;
   label: string;
-  type?: "text" | "number" | "boolean" | "select";
+  type?: "text" | "password" | "number" | "boolean" | "select";
   options?: { value: string; label: string }[];
   required?: boolean;
   min?: number;
   max?: number;
+  createOnly?: boolean;
+  updateOnly?: boolean;
 };
 
 export const tabs: { id: TabId; label: string; icon: string }[] = [
@@ -79,7 +81,8 @@ export const entityMeta: Record<
       { key: "full_name", label: "ชื่อลูกค้า", required: true },
       { key: "phone", label: "เบอร์โทรศัพท์", required: true },
       { key: "email", label: "อีเมล" },
-      { key: "is_active", label: "เปิดใช้งาน", type: "boolean" },
+      { key: "password", label: "รหัสผ่าน", type: "password", required: true, min: 8, max: 128, createOnly: true },
+      { key: "is_active", label: "เปิดใช้งาน", type: "boolean", updateOnly: true },
     ],
   },
   addresses: {

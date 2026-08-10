@@ -31,8 +31,8 @@ async function login<T>(path: string, body: Record<string, string>): Promise<T> 
 }
 
 export const authApi = {
-  userLogin: (phone: string) =>
-    login<UserLoginResponse>("/auth/user/login", { phone }),
+  userLogin: (phone: string, password: string) =>
+    login<UserLoginResponse>("/auth/user/login", { phone, password }),
   adminLogin: (adminKey: string) =>
     login<AdminLoginResponse>("/auth/admin/login", { admin_key: adminKey }),
   logoutUser: () => {

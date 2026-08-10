@@ -19,6 +19,7 @@ const normalizePhone = (value: string) => value.replace(/\D/g, "").slice(0, 10);
 export default function Home() {
   const navigate = useNavigate();
   const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -31,10 +32,15 @@ export default function Home() {
       return;
     }
 
+    if (password.length < 8 || password.length > 128) {
+      setError("รหัสผ่านต้องมีความยาว 8–128 ตัวอักษร");
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
-      const result = await authApi.userLogin(normalizedPhone);
+      const result = await authApi.userLogin(normalizedPhone, password);
       const previousPhone = localStorage.getItem("foodApiGuestPhone");
       if (previousPhone && previousPhone !== normalizedPhone) {
         Object.keys(localStorage)
@@ -146,6 +152,42 @@ export default function Home() {
                   aria-invalid={Boolean(error)}
                   aria-describedby={error ? "phone-error" : undefined}
                   className="min-w-0 flex-1 bg-transparent px-4 py-4 text-base font-medium tracking-wide text-dark outline-none placeholder:text-gray-400"
+                />
+              </div>
+
+              <label
+                htmlFor="password"
+                className="mb-2 mt-5 block text-sm font-bold text-gray-700"
+              >
+                รหัสผ่าน
+              </label>
+              <div
+                className={`flex items-center rounded-2xl border bg-gray-50 transition focus-within:bg-white focus-within:ring-4 ${
+                  error
+                    ? "border-red-400 focus-within:border-red-400 focus-within:ring-red-100"
+                    : "border-gray-200 focus-within:border-primary focus-within:ring-red-100"
+                }`}
+              >
+                <span className="px-4 text-gray-400">
+                  <i className="fas fa-lock" />
+                </span>
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  minLength={8}
+                  maxLength={128}
+                  required
+                  placeholder="รหัสผ่านอย่างน้อย 8 ตัวอักษร"
+                  value={password}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    if (error) setError("");
+                  }}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? "phone-error" : undefined}
+                  className="min-w-0 flex-1 bg-transparent px-1 py-4 pr-4 text-base font-medium text-dark outline-none placeholder:text-gray-400"
                 />
               </div>
 

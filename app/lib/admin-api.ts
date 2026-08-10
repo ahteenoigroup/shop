@@ -1,6 +1,7 @@
 import { apiRequest } from "./api-client";
 import { FoodApiError } from "./food-api";
 import { authApi } from "./auth-api";
+import { createId } from "./browser-utils";
 
 export type AdminEntity =
   | "categories"
@@ -84,9 +85,6 @@ const idFields: Partial<Record<AdminEntity, string>> = {
   addresses: "address_id",
   riders: "rider_id",
 };
-
-const createId = (prefix: string) =>
-  `${prefix}${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 16);
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return apiRequest<T>(`/${path}`, init, "admin");

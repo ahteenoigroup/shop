@@ -1,4 +1,5 @@
 import { API_URL, ApiError, apiRequest, getAccessToken } from "./api-client";
+import { createId, stableCacheKey } from "./browser-utils";
 
 export const FOOD_API_URL = API_URL;
 
@@ -76,9 +77,6 @@ const jsonRequest = (method: "POST" | "PATCH", body: Record<string, unknown>) =>
   body: JSON.stringify(body),
 });
 
-const createId = (prefix: string) =>
-  `${prefix}${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 16);
-
 export const foodApi = {
   restaurants: () =>
     getJson<ApiRestaurant[]>(`${FOOD_API_URL}/restaurants`),
@@ -123,14 +121,7 @@ export async function ensureGuestCustomer(address: string) {
     throw new FoodApiError("กรุณาเข้าสู่ระบบก่อนสั่งอาหาร", "AUTH_REQUIRED");
   }
   const normalizedAddress = address.trim().replace(/\s+/g, " ");
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(normalizedAddress),
-  );
-  const addressCacheKey = `foodApiAddress:${Array.from(new Uint8Array(digest))
-    .slice(0, 12)
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")}`;
+  const addressCacheKey = `foodApiAddress:${await stableCacheKey(normalizedAddress)}`;
   let savedCustomerId = localStorage.getItem("foodApiCustomerId");
   let savedAddressId = localStorage.getItem(addressCacheKey);
   if (savedCustomerId?.length !== 16 || (savedAddressId && savedAddressId.length !== 16)) {

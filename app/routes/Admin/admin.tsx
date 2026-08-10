@@ -505,9 +505,12 @@ function TableToolbar({ title, count, search, setSearch, onAdd }: { title: strin
 }
 
 function EntityModal({ config, row, onClose, onSave }: { config: (typeof entityMeta)[keyof typeof entityMeta]; row?: AdminRow; onClose: () => void; onSave: (values: AdminRow) => Promise<void> }) {
+  const fields = config.fields.filter(
+    (field) => !(field.createOnly && row) && !(field.updateOnly && !row),
+  );
   const [values, setValues] = useState<AdminRow>(() => {
     const initial: AdminRow = {};
-    config.fields.forEach((field) => { initial[field.key] = row?.[field.key] ?? (field.type === "boolean" ? true : ""); });
+    fields.forEach((field) => { initial[field.key] = row?.[field.key] ?? (field.type === "boolean" ? true : ""); });
     return initial;
   });
   const [saving, setSaving] = useState(false);
@@ -517,7 +520,7 @@ function EntityModal({ config, row, onClose, onSave }: { config: (typeof entityM
     setSaving(true);
     setError("");
     const payload: AdminRow = {};
-    config.fields.forEach((field) => {
+    fields.forEach((field) => {
       const value = values[field.key];
       if (value === null || value === "") return;
       payload[field.key] = field.type === "number" ? Number(value) : value;
@@ -529,9 +532,9 @@ function EntityModal({ config, row, onClose, onSave }: { config: (typeof entityM
       <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
         <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-6 py-5"><div><h2 className="text-xl font-black">{row ? "แก้ไข" : "เพิ่ม"}{config.title}</h2><p className="text-xs text-slate-400">{row ? String(row[config.id]) : "สร้างรายการใหม่"}</p></div><button onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><i className="fas fa-xmark text-xl" /></button></div>
         <form onSubmit={submit} className="grid gap-5 p-6 sm:grid-cols-2">
-          {config.fields.map((field) => (
+          {fields.map((field) => (
             <label key={field.key} className={field.key.includes("url") ? "sm:col-span-2" : ""}><span className="mb-2 block text-sm font-bold text-slate-700">{field.label}{field.required && <span className="text-primary"> *</span>}</span>
-              {field.type === "boolean" ? <input type="checkbox" checked={Boolean(values[field.key])} onChange={(event) => setValues({ ...values, [field.key]: event.target.checked })} className="h-5 w-5 accent-red-600" /> : field.type === "select" ? <select value={String(values[field.key] ?? "")} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-3 outline-none focus:border-primary">{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input required={field.required} type={field.type || "text"} step={field.type === "number" ? "any" : undefined} min={field.min} max={field.max} value={String(values[field.key] ?? "")} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-primary" />}
+              {field.type === "boolean" ? <input type="checkbox" checked={Boolean(values[field.key])} onChange={(event) => setValues({ ...values, [field.key]: event.target.checked })} className="h-5 w-5 accent-red-600" /> : field.type === "select" ? <select value={String(values[field.key] ?? "")} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-3 outline-none focus:border-primary">{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input required={field.required} type={field.type || "text"} step={field.type === "number" ? "any" : undefined} min={field.type === "number" ? field.min : undefined} max={field.type === "number" ? field.max : undefined} minLength={field.type === "password" ? field.min : undefined} maxLength={field.type === "password" ? field.max : undefined} value={String(values[field.key] ?? "")} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-primary" />}
             </label>
           ))}
           {error && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700 sm:col-span-2">{error}</p>}
