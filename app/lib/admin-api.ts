@@ -1,4 +1,5 @@
-import { FOOD_API_URL, FoodApiError } from "./food-api";
+import { apiRequest } from "./api-client";
+import { FoodApiError } from "./food-api";
 import { authApi } from "./auth-api";
 
 export type AdminEntity =
@@ -88,23 +89,7 @@ const createId = (prefix: string) =>
   `${prefix}${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 16);
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = sessionStorage.getItem("adminAccessToken");
-  const response = await fetch(`${FOOD_API_URL}/${path}`, {
-    ...init,
-    headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers,
-    },
-  });
-  const payload = (await response.json()) as T & { message?: string | string[] };
-  if (!response.ok) {
-    const message = Array.isArray(payload.message)
-      ? payload.message.join(", ")
-      : payload.message;
-    throw new FoodApiError(message || `Admin API error (${response.status})`, String(response.status));
-  }
-  return payload;
+  return apiRequest<T>(`/${path}`, init, "admin");
 }
 
 const listRows = (entity: AdminEntity) => {
@@ -113,10 +98,44 @@ const listRows = (entity: AdminEntity) => {
   return request<AdminRow[]>(path);
 };
 
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, values.length) },
+    async () => {
+      while (cursor < values.length) {
+        const index = cursor++;
+        results[index] = await mapper(values[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+const bangkokDate = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
+function entityPath(entity: AdminEntity) {
+  const path = entityPaths[entity];
+  if (!path) throw new FoodApiError(`ยังไม่มี REST endpoint สำหรับ ${entity}`);
+  return path;
+}
+
 export const adminApi = {
   authenticate: (adminKey: string) =>
     authApi.adminLogin(adminKey),
-  snapshot: async (_adminKey: string): Promise<AdminSnapshot> => {
+  snapshot: async (): Promise<AdminSnapshot> => {
     const [categories, restaurants, menuItems, customers, addresses, riders, orders] = await Promise.all([
       listRows("categories"),
       listRows("restaurants"),
@@ -126,13 +145,15 @@ export const adminApi = {
       listRows("riders"),
       listRows("orders"),
     ]);
-    const orderDetails = await Promise.all(
-      orders.map((order) => request<AdminOrderDetail>(`orders/${encodeURIComponent(String(order.order_id))}`)),
+    const orderDetails = await mapWithConcurrency(
+      orders,
+      6,
+      (order) => request<AdminOrderDetail>(`orders/${encodeURIComponent(String(order.order_id))}`),
     );
     const payments = orderDetails
       .map((order) => order.payment)
       .filter(Boolean) as unknown as AdminRow[];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = bangkokDate();
     const todayOrders = orders.filter((order) => String(order.ordered_at || "").slice(0, 10) === today);
     const paidOrders = orders.filter((order) => order.payment_status === "paid");
     return {
@@ -162,7 +183,7 @@ export const adminApi = {
       ),
     };
   },
-  list: async (_adminKey: string, entity: AdminEntity, query = "") => {
+  list: async (entity: AdminEntity, query = "") => {
     const rows = await listRows(entity);
     const filtered = query
       ? rows.filter((row) => Object.values(row).some((value) => String(value ?? "").toLowerCase().includes(query.toLowerCase())))
@@ -170,12 +191,11 @@ export const adminApi = {
     return { entity, headers: Object.keys(filtered[0] || {}), rows: filtered };
   },
   upsert: (
-    adminKey: string,
     entity: AdminEntity,
     values: AdminRow,
     id?: string,
   ) =>
-    request<AdminRow>(`${entityPaths[entity]}${id ? `/${encodeURIComponent(id)}` : ""}`, {
+    request<AdminRow>(`${entityPath(entity)}${id ? `/${encodeURIComponent(id)}` : ""}`, {
       method: id ? "PATCH" : "POST",
       body: JSON.stringify(
         id || !idFields[entity]
@@ -183,13 +203,12 @@ export const adminApi = {
           : { ...values, [idFields[entity]!]: createId(prefixes[entity] || "ID") },
       ),
     }),
-  remove: (adminKey: string, entity: AdminEntity, id: string) =>
+  remove: (entity: AdminEntity, id: string) =>
     request<{ id: string; deleted: boolean; deactivated: boolean }>(
-      `${entityPaths[entity]}/${encodeURIComponent(id)}`,
+      `${entityPath(entity)}/${encodeURIComponent(id)}`,
       { method: "DELETE" },
     ),
   updateOrder: (
-    adminKey: string,
     orderId: string,
     values: {
       order_status?: string;

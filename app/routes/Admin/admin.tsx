@@ -11,6 +11,12 @@ import {
 import { entityMeta, tabs, type TabId } from "./admin-config";
 import { AdminLoginPage } from "./pages/AdminLoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import {
+  ApiError,
+  getAccessToken,
+  removeAccessToken,
+  saveAccessToken,
+} from "../../lib/api-client";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -45,7 +51,7 @@ const riderStatusMeta: Record<string, { label: string; className: string }> = {
 export default function Admin() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [adminKey, setAdminKey] = useState("");
+  const [authenticated, setAuthenticated] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [snapshot, setSnapshot] = useState<AdminSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -59,10 +65,9 @@ export default function Admin() {
     : "dashboard";
 
   useEffect(() => {
-    const saved = sessionStorage.getItem("adminKey");
-    const token = sessionStorage.getItem("adminAccessToken");
-    if (saved && token) {
-      setAdminKey(saved);
+    const token = getAccessToken("admin");
+    if (token) {
+      setAuthenticated(true);
       if (location.pathname === "/admin" || location.pathname === "/admin/") {
         navigate("/admin/dashboard", { replace: true });
       }
@@ -73,21 +78,25 @@ export default function Admin() {
 
   useEffect(() => {
     if (
-      adminKey &&
+      authenticated &&
       section &&
       !tabs.some((tab) => tab.id === section)
     ) {
       navigate("/admin/dashboard", { replace: true });
     }
-  }, [adminKey, navigate, section]);
+  }, [authenticated, navigate, section]);
 
-  const loadSnapshot = useCallback(async (key: string) => {
+  const loadSnapshot = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const result = await adminApi.snapshot(key);
+      const result = await adminApi.snapshot();
       setSnapshot(result);
     } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "401") {
+        setAuthenticated(false);
+        navigate("/admin", { replace: true });
+      }
       setError(caught instanceof Error ? caught.message : "โหลดข้อมูลไม่สำเร็จ");
       setSnapshot(null);
     } finally {
@@ -96,8 +105,8 @@ export default function Admin() {
   }, []);
 
   useEffect(() => {
-    if (adminKey) void loadSnapshot(adminKey);
-  }, [adminKey, loadSnapshot]);
+    if (authenticated) void loadSnapshot();
+  }, [authenticated, loadSnapshot]);
 
   const login = async (event: FormEvent) => {
     event.preventDefault();
@@ -106,9 +115,9 @@ export default function Admin() {
     setError("");
     try {
       const result = await adminApi.authenticate(keyInput.trim());
-      sessionStorage.setItem("adminKey", keyInput.trim());
-      sessionStorage.setItem("adminAccessToken", result.access_token);
-      setAdminKey(keyInput.trim());
+      saveAccessToken("admin", result.access_token);
+      setAuthenticated(true);
+      setKeyInput("");
       navigate("/admin/dashboard", { replace: true });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "เข้าสู่ระบบไม่สำเร็จ");
@@ -118,15 +127,14 @@ export default function Admin() {
   };
 
   const logout = () => {
-    sessionStorage.removeItem("adminKey");
-    sessionStorage.removeItem("adminAccessToken");
-    setAdminKey("");
+    removeAccessToken("admin");
+    setAuthenticated(false);
     setKeyInput("");
     setSnapshot(null);
     navigate("/admin", { replace: true });
   };
 
-  if (!adminKey) {
+  if (!authenticated) {
     return (
       <AdminLoginPage
         keyInput={keyInput}
@@ -198,7 +206,7 @@ export default function Admin() {
             </div>
           </div>
           <button
-            onClick={() => void loadSnapshot(adminKey)}
+            onClick={() => void loadSnapshot()}
             disabled={loading}
             className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
           >
@@ -225,8 +233,7 @@ export default function Admin() {
               search={search}
               setSearch={setSearch}
               setModal={setModal}
-              adminKey={adminKey}
-              reload={() => loadSnapshot(adminKey)}
+              reload={loadSnapshot}
               setError={setError}
             />
           ) : null}
@@ -241,13 +248,12 @@ export default function Admin() {
           onSave={async (values) => {
             const config = entityMeta[modal.entity];
             await adminApi.upsert(
-              adminKey,
               config.entity,
               values,
               modal.row ? String(modal.row[config.id]) : undefined,
             );
             setModal(null);
-            await loadSnapshot(adminKey);
+            await loadSnapshot();
           }}
         />
       )}
@@ -261,7 +267,6 @@ function AdminContent({
   search,
   setSearch,
   setModal,
-  adminKey,
   reload,
   setError,
 }: {
@@ -270,13 +275,12 @@ function AdminContent({
   search: string;
   setSearch: (value: string) => void;
   setModal: (value: { entity: keyof typeof entityMeta; row?: AdminRow } | null) => void;
-  adminKey: string;
   reload: () => Promise<void>;
   setError: (value: string) => void;
 }) {
   if (activeTab === "dashboard") return <DashboardPage snapshot={snapshot} />;
   if (activeTab === "orders")
-    return <OrdersTable rows={snapshot.recent_orders} details={snapshot.order_details} riders={snapshot.riders} adminKey={adminKey} reload={reload} setError={setError} />;
+    return <OrdersTable rows={snapshot.recent_orders} details={snapshot.order_details} riders={snapshot.riders} reload={reload} setError={setError} />;
   if (activeTab === "payments")
     return <SimpleTable title="รายการชำระเงิน" rows={snapshot.payments} columns={["payment_id", "order_id", "method", "amount", "status", "paid_at"]} search={search} setSearch={setSearch} />;
 
@@ -293,7 +297,7 @@ function AdminContent({
       onDelete={async (row) => {
         if (!window.confirm(`ยืนยันปิดใช้งาน ${String(row[config.id])}?`)) return;
         try {
-          await adminApi.remove(adminKey, config.entity, String(row[config.id]));
+          await adminApi.remove(config.entity, String(row[config.id]));
           await reload();
         } catch (caught) {
           setError(caught instanceof Error ? caught.message : "ดำเนินการไม่สำเร็จ");
@@ -360,11 +364,11 @@ function EntityTable({
   );
 }
 
-function OrdersTable({ rows, details, riders, adminKey, reload, setError }: { rows: AdminRow[]; details: Record<string, AdminOrderDetail>; riders: AdminRow[]; adminKey: string; reload: () => Promise<void>; setError: (value: string) => void }) {
+function OrdersTable({ rows, details, riders, reload, setError }: { rows: AdminRow[]; details: Record<string, AdminOrderDetail>; riders: AdminRow[]; reload: () => Promise<void>; setError: (value: string) => void }) {
   const [selectedOrder, setSelectedOrder] = useState<AdminRow | null>(null);
   const update = async (order: AdminRow, field: "order_status" | "payment_status" | "rider_id", value: string) => {
     try {
-      await adminApi.updateOrder(adminKey, String(order.order_id), { [field]: value });
+      await adminApi.updateOrder(String(order.order_id), { [field]: value });
       await reload();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "อัปเดตไม่สำเร็จ");
@@ -374,7 +378,7 @@ function OrdersTable({ rows, details, riders, adminKey, reload, setError }: { ro
     const orderNumber = String(order.order_number || order.order_id);
     if (!window.confirm(`ยืนยันลบออเดอร์ #${orderNumber} ถาวร? ข้อมูลที่เกี่ยวข้องจะถูกลบทั้งหมดและไม่สามารถกู้คืนได้`)) return;
     try {
-      await adminApi.remove(adminKey, "orders", String(order.order_id));
+      await adminApi.remove("orders", String(order.order_id));
       await reload();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "ลบออเดอร์ไม่สำเร็จ");
@@ -483,7 +487,7 @@ function SimpleTable({ title, rows, columns, search, setSearch }: { title: strin
   return (
     <div className="rounded-2xl border border-slate-100 bg-white shadow-sm">
       <TableToolbar title={title} count={filtered.length} search={search} setSearch={setSearch} />
-      <div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-400"><tr>{columns.map((column) => <th key={column} className="px-5 py-4">{column}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{filtered.map((row, index) => <tr key={index}>{columns.map((column) => <td key={column} className="px-5 py-4">{column === "amount" ? money(row[column]) : column === "status" ? <span className={`rounded-full px-2 py-1 text-xs font-bold ${statusClass(String(row[column]))}`}>{String(row[column])}</span> : String(row[column] ?? "-")}</td>)}</tr>)}</tbody></table></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-400"><tr>{columns.map((column) => <th key={column} className="px-5 py-4">{column}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{filtered.map((row) => <tr key={String(row.payment_id ?? row.order_id)}>{columns.map((column) => <td key={column} className="px-5 py-4">{column === "amount" ? money(row[column]) : column === "status" ? <span className={`rounded-full px-2 py-1 text-xs font-bold ${statusClass(String(row[column]))}`}>{String(row[column])}</span> : String(row[column] ?? "-")}</td>)}</tr>)}</tbody></table></div>
     </div>
   );
 }

@@ -79,7 +79,6 @@ export const entityMeta: Record<
       { key: "full_name", label: "ชื่อลูกค้า", required: true },
       { key: "phone", label: "เบอร์โทรศัพท์", required: true },
       { key: "email", label: "อีเมล" },
-      { key: "password_hash", label: "Password hash" },
       { key: "is_active", label: "เปิดใช้งาน", type: "boolean" },
     ],
   },

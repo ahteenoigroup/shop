@@ -1,16 +1,8 @@
-const configuredApiUrl = import.meta.env.VITE_FOOD_API_URL?.trim();
+import { API_URL, ApiError, apiRequest, getAccessToken } from "./api-client";
 
-export const FOOD_API_URL = (configuredApiUrl || "http://localhost:3000/api").replace(/\/$/, "");
+export const FOOD_API_URL = API_URL;
 
-export class FoodApiError extends Error {
-  code?: string;
-
-  constructor(message: string, code?: string) {
-    super(message);
-    this.name = "FoodApiError";
-    this.code = code;
-  }
-}
+export class FoodApiError extends ApiError {}
 
 export interface ApiRestaurant {
   restaurant_id: string;
@@ -74,38 +66,8 @@ export interface ApiOrder {
 }
 
 const getJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
-  let response: Response;
-  try {
-    response = await fetch(url, { redirect: "follow", ...init });
-  } catch {
-    throw new FoodApiError(
-      `ไม่สามารถเชื่อมต่อ Food API ที่ ${FOOD_API_URL} ได้`,
-      "API_UNREACHABLE",
-    );
-  }
-  const contentType = response.headers.get("content-type") || "";
-
-  if (!contentType.includes("application/json")) {
-    throw new FoodApiError(
-      `Food API ตอบกลับด้วยข้อมูลที่ไม่ใช่ JSON (${response.status})`,
-      "INVALID_API_RESPONSE",
-    );
-  }
-
-  const payload = (await response.json()) as T & {
-    message?: string | string[];
-    error?: string;
-  };
-  if (!response.ok) {
-    const message = Array.isArray(payload.message)
-      ? payload.message.join(", ")
-      : payload.message;
-    throw new FoodApiError(
-      message || payload.error || `Food API error (${response.status})`,
-      String(response.status),
-    );
-  }
-  return payload;
+  const path = url.startsWith(FOOD_API_URL) ? url.slice(FOOD_API_URL.length) : url;
+  return apiRequest<T>(path, init, "user");
 };
 
 const jsonRequest = (method: "POST" | "PATCH", body: Record<string, unknown>) => ({
@@ -124,15 +86,8 @@ export const foodApi = {
     const detail = await getJson<ApiRestaurant & { menu_items: ApiMenuItem[] }>(
       `${FOOD_API_URL}/restaurants/${encodeURIComponent(restaurantId)}`,
     );
-    const menu = await Promise.all(
-      detail.menu_items.map((item) =>
-        getJson<ApiMenuItem>(
-          `${FOOD_API_URL}/menu-items/${encodeURIComponent(item.menu_item_id)}`,
-        ),
-      ),
-    );
     const { menu_items: _menuItems, ...restaurant } = detail;
-    return { restaurant, menu };
+    return { restaurant, menu: detail.menu_items };
   },
   menu: (restaurantId: string) =>
     getJson<ApiMenuItem[]>(
@@ -164,11 +119,23 @@ export const foodApi = {
 };
 
 export async function ensureGuestCustomer(address: string) {
+  if (!getAccessToken("user")) {
+    throw new FoodApiError("กรุณาเข้าสู่ระบบก่อนสั่งอาหาร", "AUTH_REQUIRED");
+  }
+  const normalizedAddress = address.trim().replace(/\s+/g, " ");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(normalizedAddress),
+  );
+  const addressCacheKey = `foodApiAddress:${Array.from(new Uint8Array(digest))
+    .slice(0, 12)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")}`;
   let savedCustomerId = localStorage.getItem("foodApiCustomerId");
-  let savedAddressId = localStorage.getItem(`foodApiAddress:${address}`);
-  if ((savedCustomerId?.length ?? 0) > 16 || (savedAddressId?.length ?? 0) > 16) {
+  let savedAddressId = localStorage.getItem(addressCacheKey);
+  if (savedCustomerId?.length !== 16 || (savedAddressId && savedAddressId.length !== 16)) {
     localStorage.removeItem("foodApiCustomerId");
-    localStorage.removeItem(`foodApiAddress:${address}`);
+    localStorage.removeItem(addressCacheKey);
     savedCustomerId = null;
     savedAddressId = null;
   }
@@ -189,10 +156,10 @@ export async function ensureGuestCustomer(address: string) {
     label: "ที่อยู่จัดส่ง",
     recipient_name: "ลูกค้าออนไลน์",
     phone,
-    address_line: address,
+    address_line: normalizedAddress,
     province: "กรุงเทพมหานคร",
     is_default: true,
   });
-  localStorage.setItem(`foodApiAddress:${address}`, savedAddress.address_id);
+  localStorage.setItem(addressCacheKey, savedAddress.address_id);
   return { customerId, addressId: savedAddress.address_id };
 }

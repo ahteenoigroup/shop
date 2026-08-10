@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import type { Route } from "./+types/home";
 import { authApi } from "../lib/auth-api";
+import { saveAccessToken } from "../lib/api-client";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -40,7 +41,7 @@ export default function Home() {
           .filter((key) => key.startsWith("foodApiAddress:"))
           .forEach((key) => localStorage.removeItem(key));
       }
-      localStorage.setItem("foodApiAccessToken", result.access_token);
+      saveAccessToken("user", result.access_token);
       localStorage.setItem("foodApiCustomerId", result.user.customer_id);
       localStorage.setItem("foodApiGuestPhone", result.user.phone);
       localStorage.setItem("foodApiUser", JSON.stringify(result.user));

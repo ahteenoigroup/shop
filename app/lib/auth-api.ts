@@ -1,4 +1,4 @@
-import { FOOD_API_URL, FoodApiError } from "./food-api";
+import { apiRequest, removeAccessToken } from "./api-client";
 
 export interface UserLoginResponse {
   access_token: string;
@@ -20,31 +20,14 @@ export interface AdminLoginResponse {
 }
 
 async function login<T>(path: string, body: Record<string, string>): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${FOOD_API_URL}${path}`, {
+  return apiRequest<T>(
+    path,
+    {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
-  } catch {
-    throw new FoodApiError("ไม่สามารถเชื่อมต่อระบบเข้าสู่ระบบได้", "API_UNREACHABLE");
-  }
-
-  const payload = (await response.json()) as T & {
-    message?: string | string[];
-    error?: string;
-  };
-  if (!response.ok) {
-    const message = Array.isArray(payload.message)
-      ? payload.message.join(", ")
-      : payload.message;
-    throw new FoodApiError(
-      message || payload.error || "เข้าสู่ระบบไม่สำเร็จ",
-      String(response.status),
-    );
-  }
-  return payload;
+    },
+    "none",
+  );
 }
 
 export const authApi = {
@@ -53,7 +36,7 @@ export const authApi = {
   adminLogin: (adminKey: string) =>
     login<AdminLoginResponse>("/auth/admin/login", { admin_key: adminKey }),
   logoutUser: () => {
-    localStorage.removeItem("foodApiAccessToken");
+    removeAccessToken("user");
     localStorage.removeItem("foodApiCustomerId");
     localStorage.removeItem("foodApiGuestPhone");
     localStorage.removeItem("foodApiUser");
