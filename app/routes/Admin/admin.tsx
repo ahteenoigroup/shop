@@ -295,9 +295,13 @@ function AdminContent({
       onAdd={() => setModal({ entity: activeTab })}
       onEdit={(row) => setModal({ entity: activeTab, row })}
       onDelete={async (row) => {
-        if (!window.confirm(`ยืนยันปิดใช้งาน ${String(row[config.id])}?`)) return;
+        const itemId = String(row[config.id]);
+        const confirmation = config.entity === "customers"
+          ? `ยืนยันลบลูกค้า ${String(row.full_name || itemId)} ถาวร? ที่อยู่ ออเดอร์ และข้อมูลการชำระเงินที่เกี่ยวข้องจะถูกลบและไม่สามารถกู้คืนได้`
+          : `ยืนยันปิดใช้งาน ${itemId}?`;
+        if (!window.confirm(confirmation)) return;
         try {
-          await adminApi.remove(config.entity, String(row[config.id]));
+          await adminApi.remove(config.entity, itemId);
           await reload();
         } catch (caught) {
           setError(caught instanceof Error ? caught.message : "ดำเนินการไม่สำเร็จ");
@@ -353,7 +357,15 @@ function EntityTable({
                 ))}
                 <td className="px-5 py-4 text-right">
                   <button onClick={() => onEdit(row)} className="mr-2 rounded-lg bg-blue-50 px-3 py-2 text-blue-700 hover:bg-blue-100"><i className="fas fa-pen" /></button>
-                  <button onClick={() => onDelete(row)} className="rounded-lg bg-red-50 px-3 py-2 text-red-700 hover:bg-red-100"><i className="fas fa-power-off" /></button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(row)}
+                    className="rounded-lg bg-red-50 px-3 py-2 font-bold text-red-700 hover:bg-red-100"
+                    title={config.entity === "customers" ? "ลบลูกค้า" : "ปิดใช้งาน"}
+                  >
+                    <i className={`fas ${config.entity === "customers" ? "fa-trash mr-2" : "fa-power-off"}`} />
+                    {config.entity === "customers" ? "ลบ" : null}
+                  </button>
                 </td>
               </tr>
             ))}
